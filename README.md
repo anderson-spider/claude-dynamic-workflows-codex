@@ -95,7 +95,7 @@ Behind that one line, Claude:
 1. **Preflights** Codex — confirms the app-server is reachable and notes the latest frontier model.
 2. **Compiles** your rough intent into a concrete harness — picks the scale, archetype, and pattern, builds a task contract, and states its assumptions (no external "metaprompt" needed).
 3. **Authors** a workflow script into your project (`./<name>.workflow.js`) — so you can read it, tweak it, and rerun it.
-4. **Runs** it on Codex, pinning **every agent to the latest frontier model** (`gpt-5.5`) and **scaling thinking effort to the harness** — a small run goes flat `--effort medium`, while a bigger one uses `--auto-effort` so a lone judge/synthesize gate thinks hardest (`xhigh`) and wide fan-outs floor at `high`.
+4. **Runs** it on Codex, pinning **every agent to the latest frontier model** (`gpt-5.6-sol` today) and **scaling thinking effort to the harness** — a small run goes flat `--effort medium`, while a bigger one uses `--auto-effort` so a lone judge/synthesize gate gets the policy's extra-high tier (`xhigh`) and wide fan-outs floor at `high`.
 5. **Surfaces** the outcome right in the conversation — a summary, the script path, and the run's **execution map rendered inline** as text:
 
 ```text
@@ -121,6 +121,12 @@ Behind that one line, Claude:
 │ Fed, jobs and AI earnings kept stocks near records into the June 3 close.    │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ```
+
+The captured output above is preserved from a GPT-5.5 run. The current GPT-5.6
+Codex series is **Sol** (flagship), **Terra** (balanced), and **Luna**
+(efficient). This skill deliberately does not route stages across those tiers:
+`--frontier` dynamically detects the current flagship and pins the whole run to
+that one model.
 
 ### Steering your run — just ask
 
@@ -474,7 +480,7 @@ Key flags: `--frontier` (pin the latest frontier model), `--auto-effort` (scale 
 
 ### The run summary report
 
-`run-workflow` prints a one-line recap when a run finishes (`--summary` for the full report; `--no-summary` to silence it). To distill any past run yourself — what it cost, where the time went, and whether anything looks off — point `summarize-run` at the journal:
+`run-workflow` prints a one-line recap when a run finishes (`--summary` for the full report; `--no-summary` to silence it). To distill any past run yourself — what it cost, where the time went, and whether anything looks off — point `summarize-run` at the journal. The bundled report below is preserved output from the GPT-5.5 incident demo:
 
 ```text
 $ node runner/bin/summarize-run.js examples/incident-demo
@@ -509,7 +515,7 @@ $ node runner/bin/summarize-run.js examples/incident-demo
 
 The race shows up honestly: the two cancelled workers are counted as `cancelled` (not failures), the winner's two turns are billed as `hunt:n+1 · t0` / `· t1`, and the warm steer (`t1`, 47k) is visibly cheaper than the cold hunt (`t0`, 141k).
 
-It reads the journal plus any sidecars: the **event stream** adds true wall-clock per phase, **cache hit rate** on a resumed run, and detection of **interrupted** agents (started, never finished); the **meta** sidecar adds **budget usage**. It also flags risks — missing metrics, many null results, an un-staged huge fan-out, agents left on the expensive default effort. It's read-only (never touches the journal), handles old journals that predate the metric fields, and emits `--json` (structured) or `--markdown` (paste-ready) as well as text.
+It reads the journal plus any sidecars: the **event stream** adds true wall-clock per phase, **cache hit rate** on a resumed run, and detection of **interrupted** agents (started, never finished); the **meta** sidecar adds **budget usage**. It also flags risks — missing metrics, many null results, an un-staged huge fan-out, agents left on inherited or model-default effort. It's read-only (never touches the journal), handles old journals that predate the metric fields, and emits `--json` (structured) or `--markdown` (paste-ready) as well as text.
 
 A minimal workflow script (the DSL — `agent` / `parallel` / `pipeline` / `phase` / `budget` / `args` — is documented in [`references/authoring.md`](references/authoring.md), with runnable templates in [`examples/`](examples)):
 
@@ -542,7 +548,7 @@ Claude Code's workflow runtime is sealed inside its binary, so this is an **exte
 | session resume (`--resume`) | `thread/resume` re-attaches the persisted thread; completed turns replay from the journal |
 | `session.steer(msg)` | another `turn/start` on the **same** thread — a follow-up turn |
 | `agentType: 'x'` | loads `.claude/agents/x.md` → `developerInstructions` |
-| Claude model id / alias | remapped to an available Codex model via `model/list` |
+| Claude model id / alias | when unpinned, Opus → Sol, Sonnet → Terra, and Haiku → Luna when available; resolved via `model/list` |
 | sandbox / permissions | `approvalPolicy:"never"` + sandbox |
 | transient errors | retry with backoff; app-server auto-reconnect |
 | `parallel` / `pipeline` / `phase` / `budget` | unchanged — provider-neutral JS |
@@ -556,7 +562,7 @@ Full internals, the protocol mapping, and a faithfulness comparison vs. the nati
 ## Requirements & compatibility
 
 - **Node ≥ 18**, zero npm dependencies.
-- A logged-in **`codex` CLI** with the `app-server` subcommand. Built and verified against `codex` **0.135.0**; method names/shapes are stable, but you can regenerate bindings for your version with `codex app-server generate-json-schema --out DIR`.
+- A logged-in **`codex` CLI** with the `app-server` subcommand. Built and verified against `codex` **0.144.0**; method names/shapes are stable, but you can regenerate bindings for your version with `codex app-server generate-json-schema --out DIR`.
 
 ## Safety
 

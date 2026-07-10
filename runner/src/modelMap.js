@@ -10,9 +10,15 @@ export function modelId(m) {
 
 // Claude tier -> ordered Codex preferences (first available wins).
 const FAMILY_PREFERENCES = {
-  opus: ["gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.2"],
-  sonnet: ["gpt-5.4", "gpt-5.5", "gpt-5.3-codex", "gpt-5.4-mini"],
-  haiku: ["gpt-5.4-mini", "gpt-5.4", "gpt-5.2"],
+  opus: ["gpt-5.6-sol", "gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.2"],
+  sonnet: ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.4", "gpt-5.5", "gpt-5.3-codex", "gpt-5.4-mini"],
+  haiku: ["gpt-5.6-luna", "gpt-5.4-mini", "gpt-5.6-terra", "gpt-5.4", "gpt-5.2"],
+};
+
+// The API's family alias is not necessarily listed by Codex model/list. Resolve
+// it to the explicit catalog id so `--model gpt-5.6` works with the App Server.
+const MODEL_ALIASES = {
+  "gpt-5.6": "gpt-5.6-sol",
 };
 
 // Matches Claude full ids ("claude-opus-4-8") and bare aliases ("opus").
@@ -52,8 +58,17 @@ export function resolveModel(requested, available = [], log = () => {}) {
     return undefined;
   }
 
-  if (!available.length) return requested; // non-Claude id, can't validate — trust it
+  // Preserve an exact catalog id before expanding API aliases. This also keeps
+  // the resolver compatible if a future catalog exposes the bare family alias.
   if (available.includes(requested)) return requested;
+
+  const alias = MODEL_ALIASES[String(requested).toLowerCase()];
+  if (alias && (!available.length || available.includes(alias))) {
+    log(`model: '${requested}' → '${alias}'`);
+    return alias;
+  }
+
+  if (!available.length) return requested; // non-Claude id, can't validate — trust it
 
   log(`model: '${requested}' not exposed by Codex → using config default (have: ${available.join(", ")})`);
   return undefined;
@@ -61,13 +76,29 @@ export function resolveModel(requested, available = [], log = () => {}) {
 
 // Pick the latest frontier model from a `model/list` result: the newest,
 // strongest general model. Excludes -mini/-spark variants and hidden models;
-// ranks by version number parsed from the id (5.5 > 5.4 > 5.3-codex > 5.2),
-// breaking ties toward the flagged default and the shorter (base) id.
+// ranks by version number, then GPT-5.6 family tier (Sol > Terra > Luna), then
+// the catalog's default flag and the shorter (base) id.
 export function pickFrontier(models = []) {
   const id = (m) => (typeof m === "string" ? m : m?.id ?? m?.model ?? m?.slug ?? m?.name);
-  const ver = (s) => {
+  const versionParts = (s) => {
     const mt = String(s).match(/(\d+(?:\.\d+)?)/);
-    return mt ? parseFloat(mt[1]) : -1;
+    return mt ? mt[1].split(".").map(Number) : [-1];
+  };
+  const compareVersionDesc = (left, right) => {
+    const a = versionParts(left);
+    const b = versionParts(right);
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      const delta = (b[i] ?? 0) - (a[i] ?? 0);
+      if (delta) return delta;
+    }
+    return 0;
+  };
+  const strength = (s) => {
+    const value = String(s).toLowerCase();
+    if (/-sol$/.test(value)) return 3;
+    if (/-terra$/.test(value)) return 2;
+    if (/-luna$/.test(value)) return 1;
+    return 3; // unsuffixed models and aliases are flagship/general models
   };
   const eligible = models
     .map((m) => ({
@@ -79,7 +110,8 @@ export function pickFrontier(models = []) {
   if (!eligible.length) return undefined;
   eligible.sort(
     (a, b) =>
-      ver(b.id) - ver(a.id) ||
+      compareVersionDesc(a.id, b.id) ||
+      strength(b.id) - strength(a.id) ||
       Number(b.isDefault) - Number(a.isDefault) ||
       a.id.length - b.id.length,
   );

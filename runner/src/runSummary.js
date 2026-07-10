@@ -65,8 +65,8 @@ function looksUnlabeled(label) {
 }
 // The catch-all phase buildRunModel assigns when an agent has no phase signal.
 const isUnphased = (phase) => !phase || phase === "Agents";
-// An effort-less agent inherits the Codex config default (often xhigh — the most
-// expensive tier). buildRunModel normalizes a missing effort to null.
+// An effort-less agent inherits the user's Codex config or the selected model's
+// default. buildRunModel normalizes a missing effort to null.
 const isDefaultEffort = (effort) => effort == null || effort === "default";
 
 // ── core: build the structured summary ──────────────────────────────────────
@@ -244,10 +244,10 @@ export function summarizeRun({ journalPath, scriptPath = null, runDir = null, ti
       warn("single-phase-fanout", `Phase "${biggest.phase}" fans out ${biggest.agents} agents with no further structure — consider staging it (e.g. find → verify) or capping the fan-out.`);
     }
   }
-  // high-cost default effort
+  // implicit effort makes cost and behavior depend on local config/model defaults
   const defaultEffort = agents.filter((a) => isDefaultEffort(a.effort)).length;
   if (defaultEffort > 0) {
-    const msg = `${defaultEffort} of ${journaled} agents ran with no explicit effort → they inherit the Codex config default (often xhigh, the most expensive tier). Use --auto-effort or --effort to control cost.`;
+    const msg = `${defaultEffort} of ${journaled} agents ran with no explicit effort → they inherit the user's Codex config or the model default. Use --auto-effort or --effort for predictable cost and behavior.`;
     (defaultEffort >= 4 || defaultEffort / journaled >= 0.5) ? warn("default-effort-cost", msg) : info("default-effort-cost", msg);
   }
   // budget pressure

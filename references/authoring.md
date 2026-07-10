@@ -64,10 +64,10 @@ The only global that calls a model. Runs `prompt` as one Codex thread+turn.
 | opt | meaning |
 | --- | --- |
 | `schema` | JSON Schema (object root, `additionalProperties:false` recommended) → Codex `outputSchema`; result is `JSON.parse`d |
-| `model` | **Leave unset in scripts.** Runs are pinned to one latest-frontier model with `--frontier`, which overrides any per-call `model` anyway. (If you do set it, Claude ids/aliases auto-map to a Codex model.) |
+| `model` | **Leave unset in scripts.** Runs are pinned to one latest-frontier model with `--frontier`, which overrides any per-call `model` anyway. (If you do set it, Claude ids/aliases map Opus → Sol, Sonnet → Terra, and Haiku → Luna when available.) |
 | `agentType` | name of a subagent in `.claude/agents/<name>.md`; its body becomes the system prompt, its frontmatter `model` a fallback |
 | `systemPrompt` | explicit developer instructions (overrides `agentType` body) |
-| `effort` | `none`/`minimal`/`low`/`medium`/`high`/`xhigh`. **Usually leave unset and run with `--auto-effort`**, which scales effort to each layer's parallel width (1→`xhigh`, 2+→`high` — the floor) so lone gate agents think hardest while every fan-out still gets `high`. A per-call `effort` *overrides* the policy, so set it only as a deliberate exception. Precedence: `--pin-effort` > per-call `effort` > `--auto-effort` > `--effort` > Codex config default (`model_reasoning_effort`, often `xhigh`). |
+| `effort` | `none`/`minimal`/`low`/`medium`/`high`/`xhigh`. **Usually leave unset and run with `--auto-effort`**, which scales effort to each layer's parallel width (1→`xhigh`, 2+→`high` — the floor) so lone gate agents get the policy's extra-high tier while every fan-out still gets `high`. A per-call `effort` *overrides* the policy, so set it only as a deliberate exception. Precedence: `--pin-effort` > per-call `effort` > `--auto-effort` > `--effort` > inherited user config or model default. With no explicit `model_reasoning_effort`, GPT-5.6 Sol's catalog default is `low`; unspecified effort is not universally `xhigh`. |
 | `sandbox` | `read-only` \| `workspace-write` \| `danger-full-access` (default `workspace-write`) |
 | `isolation` | `'worktree'` → run in a detached git worktree at HEAD (parallel file-editing agents don't collide); kept if it leaves changes |
 | `cwd` | working directory for the thread (default the runner's cwd) |
@@ -393,8 +393,10 @@ web search if your Codex has web tools).
   mode: for a field the model may leave empty, make it **nullable**
   (`type:['string','null']`) rather than omitting it from `required`. The result is
   parsed JSON; the runner also tolerates ```json fences as a fallback.
-- **One model, effort is the lever.** Runs use `--frontier`, which pins a single
-  latest-frontier model (e.g. `gpt-5.5`) and **overrides any per-call `model`** —
+- **One model, effort is the lever.** The GPT-5.6 Codex series is Sol (flagship),
+  Terra (balanced), and Luna (efficient). Runs use `--frontier`, which dynamically
+  pins the single latest-frontier model (currently `gpt-5.6-sol`) and **overrides
+  any per-call `model`** —
   so leave `model` out of `agent()` opts. This is a deliberate divergence from the
   native blog's "classify-and-route to Sonnet vs Opus": instead of *model* routing
   for cost, this re-host keeps one model and uses **thinking effort** as the dial
@@ -415,8 +417,9 @@ web search if your Codex has web tools).
   `effort` per agent. Run with `--auto-effort` and the runner reads each layer's
   fan-out width (thunks in a `parallel()`, items in a `pipeline()` stage) and
   picks effort: **1→`xhigh`** (a lone agent is a critical gate — consolidate,
-  judge, synthesize, report — so it thinks hardest) and **2+→`high`** (the
-  floor — every fan-out still thinks hard; the policy never drops to `medium`).
+  judge, synthesize, report — so it gets the policy's extra-high tier) and
+  **2+→`high`** (the floor — every fan-out still thinks hard; the policy never
+  drops to `medium`).
   This means you express importance *structurally* — a synthesis you want done
   well should be its own single-agent step, not buried inside a fan-out. Reserve
   a per-call `effort` (which overrides the policy) for a rare exception.
