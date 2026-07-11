@@ -17,7 +17,7 @@ import { resolveModel, pickFrontier } from "../src/modelMap.js";
 import { loadAgentType } from "../src/agentTypes.js";
 import { isRetryable, strictifySchema } from "../src/codexAgent.js";
 import { recordTokenUsage, resetMeter, tokensSpent, outputSpent, tokensForThread, markResumedThread } from "../src/meter.js";
-import { versionDriftNote } from "../src/codexVersion.js";
+import { versionDriftNote, VERIFIED_CODEX_VERSION } from "../src/codexVersion.js";
 
 const exec = promisify(execFile);
 
@@ -139,15 +139,22 @@ const exec = promisify(execFile);
 
 // 8) model resolution: Claude ids/aliases map; available passthrough; unknown -> default.
 {
-  const have = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"];
-  assert.equal(resolveModel("claude-opus-4-8", have), "gpt-5.5", "opus -> strongest");
-  assert.equal(resolveModel("opus", have), "gpt-5.5", "bare opus alias maps");
-  assert.equal(resolveModel("haiku", have), "gpt-5.4-mini", "haiku -> mini");
+  const have = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"];
+  assert.equal(resolveModel("claude-opus-4-8", have), "gpt-5.6-sol", "opus -> Sol");
+  assert.equal(resolveModel("sonnet", have), "gpt-5.6-terra", "sonnet -> Terra");
+  assert.equal(resolveModel("haiku", have), "gpt-5.6-luna", "haiku -> Luna");
+  assert.equal(resolveModel("gpt-5.6", have), "gpt-5.6-sol", "family alias -> explicit App Server id");
   assert.equal(resolveModel("gpt-5.4", have), "gpt-5.4", "available id passes through");
   assert.equal(resolveModel("inherit", have), undefined, "inherit -> config default");
   assert.equal(resolveModel(undefined, have), undefined, "undefined -> config default");
   assert.equal(resolveModel("made-up-model", have), undefined, "unknown -> config default");
-  assert.equal(resolveModel("claude-opus", []), "gpt-5.5", "claude maps even with empty model list");
+  assert.equal(resolveModel("claude-opus", []), "gpt-5.6-sol", "claude maps even with empty model list");
+  assert.equal(resolveModel("gpt-5.6", []), "gpt-5.6-sol", "family alias maps even with empty model list");
+
+  const legacy = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"];
+  assert.equal(resolveModel("opus", legacy), "gpt-5.5", "older catalogs retain the Opus fallback");
+  assert.equal(resolveModel("sonnet", legacy), "gpt-5.4", "older catalogs retain the Sonnet fallback");
+  assert.equal(resolveModel("haiku", legacy), "gpt-5.4-mini", "older catalogs retain the Haiku fallback");
 }
 
 // 9) agentType: read system prompt + model from .claude/agents/<name>.md.
@@ -185,22 +192,31 @@ const exec = promisify(execFile);
   assert.equal(isRetryable(new Error("some unknown failure")), false, "unknown errors not retried");
 }
 
-// 11) frontier selection: newest non-mini/spark general model.
+// 11) frontier selection: newest, strongest non-mini/spark general model.
 {
   const models = [
+    { id: "gpt-5.6-luna", isDefault: false },
+    { id: "gpt-5.6-terra", isDefault: false },
+    { id: "gpt-5.6-sol", isDefault: true },
     { id: "gpt-5.4", isDefault: false },
-    { id: "gpt-5.5", isDefault: true },
+    { id: "gpt-5.5", isDefault: false },
     { id: "gpt-5.4-mini" },
     { id: "gpt-5.3-codex" },
     { id: "gpt-5.3-codex-spark" },
     { id: "gpt-5.2" },
   ];
-  assert.equal(pickFrontier(models), "gpt-5.5", "picks newest non-mini/spark");
+  assert.equal(pickFrontier(models), "gpt-5.6-sol", "picks the latest flagship tier");
+  assert.equal(
+    pickFrontier(["gpt-5.6-luna", "gpt-5.6-terra"]),
+    "gpt-5.6-terra",
+    "prefers Terra over Luna when Sol is unavailable",
+  );
   assert.equal(
     pickFrontier(["gpt-5.2", "gpt-5.4", "gpt-5.4-mini"]),
     "gpt-5.4",
     "string ids: version-max, skips mini",
   );
+  assert.equal(pickFrontier(["gpt-5.9", "gpt-5.10"]), "gpt-5.10", "compares dotted versions numerically");
   assert.equal(
     pickFrontier([{ id: "gpt-6", hidden: true }, { id: "gpt-5.5" }]),
     "gpt-5.5",
@@ -368,9 +384,10 @@ const exec = promisify(execFile);
 
 // 20) codex version drift note: null when matching/unknown, warns on mismatch.
 {
-  assert.equal(versionDriftNote("0.135.0", "0.135.0"), null, "match -> no note");
-  assert.equal(versionDriftNote(null, "0.135.0"), null, "unknown version -> no note");
-  assert.match(versionDriftNote("0.140.0", "0.135.0"), /0\.140\.0[\s\S]*0\.135\.0/, "drift -> warns with both versions");
+  assert.equal(VERIFIED_CODEX_VERSION, "0.144.0", "compatibility marker tracks the verified App Server");
+  assert.equal(versionDriftNote("0.144.0"), null, "match -> no note");
+  assert.equal(versionDriftNote(null), null, "unknown version -> no note");
+  assert.match(versionDriftNote("0.145.0"), /0\.145\.0[\s\S]*0\.144\.0/, "drift -> warns with both versions");
 }
 
 // 21) lifecycle events: a start + end per agent, carrying phase/effort/metrics.

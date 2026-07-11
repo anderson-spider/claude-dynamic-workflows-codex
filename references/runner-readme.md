@@ -115,9 +115,9 @@ run-workflow <script.js>
   --tui               open a live ASCII map of the run in a new terminal window
   --gui               open a live HTML viewer of the run in your browser  (--monitor = both)
   --model M           fallback model (Claude ids/aliases auto-mapped); omit for config default
-  --frontier          pin ALL agents to the auto-detected latest frontier model (overrides per-call model)
+  --frontier          pin ALL agents to the auto-detected latest frontier model (currently gpt-5.6-sol; dynamic)
   --pin-model M       pin ALL agents to model M (overrides per-call model)
-  --effort E          none|minimal|low|medium|high|xhigh (flat fallback)
+  --effort E          none|minimal|low|medium|high|xhigh (flat fallback; unset inherits user config/model default)
   --auto-effort       scale effort to each layer's parallel width: 1->xhigh, 2+->high (floor)
   --pin-effort E      force ALL agents to effort E (overrides per-call effort)
   --sandbox S         read-only | workspace-write | danger-full-access
@@ -143,11 +143,14 @@ maps width → effort with `effortForLayerWidth`:
 | 2+          | `high`  |
 
 The rationale: a lone agent is a critical gate (consolidation / judge / report)
-where one weak output sinks the run, so it thinks hardest; every fan-out floors
-at `high` (the policy never drops to `medium`). The context propagates across awaits and through the
-vm-hosted thunks, so a queued or deeply-awaited agent still sees the width of the
-layer that spawned it. Effort precedence (highest first): `--pin-effort` →
-per-call `opts.effort` → `--auto-effort` → `--effort` → Codex config default. The
+where one weak output sinks the run, so it gets the policy's extra-high tier;
+every fan-out floors at `high` (the policy never drops to `medium`). The context
+propagates across awaits and through the vm-hosted thunks, so a queued or
+deeply-awaited agent still sees the width of the layer that spawned it. Effort
+precedence (highest first): `--pin-effort` →
+per-call `opts.effort` → `--auto-effort` → `--effort` → inherited user config or
+model default. With no explicit `model_reasoning_effort`, GPT-5.6 Sol's catalog
+default is `low`; unspecified effort is not universally `xhigh`. The
 *effective* effort is folded into each agent's journal identity, so toggling the
 policy between runs busts only the agents whose effort changed.
 
@@ -242,8 +245,8 @@ Token totals separate the journal's **all-in** sum (across resumes) from the
 id); **budget usage** (from the meta sidecar) bills the latest run when the event
 sidecar is present, else the all-in total — and labels which. It also raises
 warnings: missing metrics, many null results, interrupted agents, unphased /
-unlabeled agents, a single phase with a huge fan-out, and agents left on the
-(often-`xhigh`) Codex default effort.
+unlabeled agents, a single phase with a huge fan-out, and agents left on inherited
+or model-default effort.
 
 When a run directory holds several journals, `summarize-run` — like `view-run` and
 `map-run` — defaults to the **most recently modified**; **`--list`** shows them all
@@ -383,9 +386,13 @@ the job's stdin (a bash `echo @@ASK…; read answer` is a complete client).
 
 A persisted script written for Claude Code rarely needs editing to run here:
 
-- **Model translation** — a script (or `agentType`) that asks for `claude-opus-4-8`,
-  or a bare `opus`/`sonnet`/`haiku` alias, is mapped to the best available Codex
-  model (queried once via `model/list`). Unknown/`inherit` → Codex config default.
+- **Model translation** — the GPT-5.6 Codex series is Sol (flagship), Terra
+  (balanced), and Luna (efficient). A script (or `agentType`) that asks for
+  `claude-opus-4-8`, or a bare `opus`/`sonnet`/`haiku` alias, maps Opus → Sol,
+  Sonnet → Terra, and Haiku → Luna when available (queried once via
+  `model/list`, with an available-model fallback). Unknown/`inherit` → Codex
+  config default. `--frontier` bypasses this routing and dynamically pins the
+  whole run to the current flagship, now `gpt-5.6-sol`.
 - **`agentType`** — `agent(p, { agentType: 'reviewer' })` loads
   `.claude/agents/reviewer.md` (project scope first, then `~/.claude`) and uses its
   body as `developerInstructions` and its frontmatter `model` as a fallback.
@@ -450,7 +457,7 @@ bundled sample run.
 
 ## Pinning to a Codex version
 
-Method names/shapes here were verified against the installed `codex` 0.135.0
+Method names/shapes here were verified against the installed `codex` 0.144.0
 (`src/codexVersion.js` → `VERIFIED_CODEX_VERSION`). The handshake preflight
 (`npm run handshake`) prints the detected version and warns on drift. To re-verify
 or regenerate bindings for another version:

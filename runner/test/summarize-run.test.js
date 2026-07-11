@@ -88,7 +88,7 @@ const ok = (m) => { n++; console.log("  ✓ " + m); };
 }
 
 // 3) Old / metric-less journal (no tokens, ms, phase, model, effort), no script:
-//    missing-metrics + unphased + high-cost-default-effort warnings; journal-only.
+//    missing-metrics + unphased + implicit-default-effort warnings; journal-only.
 {
   const journal = [
     { key: "a#0", label: "alpha", result: "first" },
@@ -104,10 +104,11 @@ const ok = (m) => { n++; console.log("  ✓ " + m); };
   const w = codes(s, "warn");
   assert.ok(w.includes("missing-metrics"), "all-missing metrics -> warn");
   assert.ok(w.includes("unphased-agents"), "no phase signal -> all unphased -> warn");
-  assert.ok(w.includes("default-effort-cost"), "no effort -> inherits config default -> warn");
+  assert.ok(w.includes("default-effort-cost"), "no effort -> inherits user config/model default -> warn");
   assert.ok(codes(s).includes("no-events"), "absent event sidecar is explained");
   const txt = renderSummaryText(s);
   assert.doesNotMatch(txt, /^\s+Tokens/m, "no Tokens line when totals are zero");
+  assert.match(txt, /user's\s+Codex config or the model default/);
   assert.match(txt, /Warnings/);
   ok("old metric-less journal: lower-bound warnings, journal-only");
 }

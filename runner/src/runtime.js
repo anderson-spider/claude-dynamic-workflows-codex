@@ -80,8 +80,8 @@ function currentLayerWidth() {
 }
 
 // Thinking effort scales INVERSELY with layer width: a lone agent is a critical
-// gate (consolidation / judge / report) and earns maximum reasoning. Every
-// fan-out floors at `high` — we never drop to `medium`, even on wide layers.
+// gate (consolidation / judge / report) and earns the highest auto-policy tier.
+// Every fan-out floors at `high` — we never drop to `medium`, even on wide layers.
 // One knob, one place.
 //   width 1   -> xhigh   (sole agent in its layer: critical gate)
 //   width >= 2 -> high    (any fan-out: floor)

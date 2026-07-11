@@ -76,7 +76,7 @@ export class AppServerClient extends EventEmitter {
         clientInfo: this.options.clientInfo ?? {
           name: "codex-workflows",
           title: "Codex Workflows Runner",
-          version: "0.1.0",
+          version: "0.2.0",
         },
         capabilities: this.options.capabilities ?? { experimentalApi: true },
       },

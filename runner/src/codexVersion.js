@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 const exec = promisify(execFile);
 
 // Bump when the runner is re-verified against a newer codex (see runner-readme).
-export const VERIFIED_CODEX_VERSION = "0.135.0";
+export const VERIFIED_CODEX_VERSION = "0.144.0";
 
 export async function detectCodexVersion() {
   try {

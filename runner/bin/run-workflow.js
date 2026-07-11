@@ -113,7 +113,7 @@ if (opts.help || !opts.script) {
       "  --pin-model M    pin ALL agents to model M, overriding any per-call model\n" +
       "  --auto-effort    scale thinking effort to each layer's parallel width:\n" +
       "                   1 agent->xhigh, 2+ agents->high (floor). Critical single-agent\n" +
-      "                   gates (consolidate/judge/report) get maximum reasoning.\n" +
+      "                   gates (consolidate/judge/report) get the highest auto-policy tier.\n" +
       "                   Overridden by a per-call effort; overrides --effort.\n" +
       "  --pin-effort E   force ALL agents to effort E, overriding per-call effort\n" +
       "  --budget-meter   what budget.spent() counts: total (input+output, default) or\n" +
@@ -131,8 +131,8 @@ if (opts.help || !opts.script) {
 const EST_TOKENS_PER_EFFORT = {
   none: 80_000, minimal: 80_000, low: 150_000, medium: 350_000, high: 550_000, xhigh: 800_000,
 };
-// An effort-less agent inherits the Codex config default (often xhigh); cost it
-// at xhigh so the estimate doesn't under-budget.
+// An effort-less agent inherits the user's Codex config or the model default.
+// Cost that unknown at xhigh so the estimate remains conservative.
 const PLAN_DEFAULT_EFFORT = "xhigh";
 
 function printPlan(recs) {
@@ -165,7 +165,7 @@ function printPlan(recs) {
       `high ${EST_TOKENS_PER_EFFORT.high / 1000}k / xhigh ${EST_TOKENS_PER_EFFORT.xhigh / 1000}k per agent)`,
   );
   console.error(`  suggested --budget ${suggested}  (estimate ×1.3 headroom)`);
-  if (sawDefault) console.error(`  note: 'default' (no effort set) costed at ${PLAN_DEFAULT_EFFORT} (Codex config default).`);
+  if (sawDefault) console.error(`  note: 'default' (no effort set) conservatively costed at ${PLAN_DEFAULT_EFFORT}; actual user-config/model default may differ.`);
   console.error(
     "  ⚠ dynamic fan-outs over agent OUTPUT are not counted (arrays come back empty\n" +
       "    in a dry run), so this is a LOWER BOUND. Re-run --plan on a small --args\n" +

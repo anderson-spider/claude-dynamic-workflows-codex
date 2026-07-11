@@ -106,11 +106,11 @@ are unchanged; steps 2 and 4 are where rough intent gets compiled.
    ```
    It prints `state: ready` and the available models. If it fails, tell the user
    to run `codex login` (the runner needs a logged-in `codex` CLI on PATH).
-   From that list, note the **latest frontier model** — the newest, strongest
-   general model (highest `gpt-5.x`/successor that is not a `-mini`/`-spark`
-   variant; `model/list` flags it `isDefault` and its description calls it the
-   strongest). Today that is `gpt-5.5`. Every agent in the run uses it (see
-   *Model*).
+   From that list, note the **latest frontier model** — the newest flagship
+   general model (not a `-mini`/`-spark` variant; `model/list` flags it
+   `isDefault` and its description calls it the strongest). The GPT-5.6 Codex
+   series is Sol (flagship), Terra (balanced), and Luna (efficient); today the
+   frontier is `gpt-5.6-sol`. Every agent in the run uses it (see *Model*).
 
 2. **Compile** the rough intent into a workflow (see *Compiling rough intent into a
    workflow*): classify the job → pick the scale → pick the archetype → pick the
@@ -195,7 +195,8 @@ each bets on, per-run budgets) before launching. Two axes, freely mixed:
   One script per variant.
 
 Split the user's overall budget across variants (status shows each run's
-spend against its ceiling). **Size read-heavy fan-outs realistically:** an
+spend against its ceiling). **Size read-heavy fan-outs realistically using the
+existing GPT-5.5 measurements:** an
 agent whose job is *reading a repo/corpus* costs **~400–600k tokens
 regardless of its effort tier** — the input dominates, so `--effort low`
 does not make a sweep cheap, and `--plan`'s per-effort estimate undercounts
@@ -527,15 +528,16 @@ JavaScript using only the injected globals (no imports / fs — agents do all I/
 
 Use a **single model — the latest frontier model — for every agent in the run.**
 Do not mix models, and do not downgrade "cheap" or "simple" stages to a smaller
-or older model. The frontier model is the one identified at preflight (newest,
-strongest, `isDefault`; currently **`gpt-5.5`**) — never `gpt-5.4`/`gpt-5.2` or a
-`-mini`/`-spark` variant.
+or older model. The GPT-5.6 Codex series is **Sol** (flagship), **Terra**
+(balanced), and **Luna** (efficient). The frontier model is the newest flagship
+identified at preflight (`isDefault`; currently **`gpt-5.6-sol`**) — never
+`gpt-5.4`/`gpt-5.2` or a `-mini`/`-spark` variant.
 
 Enforce it with **`--frontier`** (always pass it): the runner auto-detects the
 latest frontier model from `model/list` and pins **every** agent to it,
 **overriding any per-call `model`** a script sets. This is a hard guarantee — even
 if a script asks for `gpt-5.4`, `--frontier` forces it to the frontier and logs
-the override. (To pin a specific model instead, use `--pin-model gpt-5.5`.)
+the override. (To pin a specific model instead, use `--pin-model gpt-5.6-sol`.)
 
 Also good practice, though `--frontier` makes it non-essential: don't set a
 per-call `model` in scripts — leave `model` out of every `agent()` opts object.
@@ -548,7 +550,8 @@ Thinking effort is the second dial (after model). The principle: **the fewer
 agents run in parallel at a step, the more pivotal each one is, so the harder it
 should think.** A lone agent in its layer is almost always a critical *gate* — a
 consolidation, a judge/synthesis, a final report — where one weak output sinks the
-whole run; it earns maximum reasoning. A 12-wide persona fan-out is the opposite:
+whole run; it earns the auto-policy's extra-high `xhigh` tier. A 12-wide persona
+fan-out is the opposite:
 each agent is one voice among many, and redundancy covers individual misses.
 
 **For a standard or deep harness, pass `--auto-effort`** (a small `quick_harness`
@@ -568,8 +571,8 @@ The floor is `high`; the policy never drops to `medium`. No per-agent bookkeepin
 
 Precedence (highest first): **`--pin-effort E`** (force every agent to `E`) →
 a script's **per-call `effort`** → **`--auto-effort`** layer policy → flat
-**`--effort E`** → Codex config default. Because per-call effort overrides the
-policy, **do not hand-set `effort` in scripts** — leave it out and let
+**`--effort E`** → inherited user config or model default. Because per-call
+effort overrides the policy, **do not hand-set `effort` in scripts** — leave it out and let
 `--auto-effort` govern; reserve a per-call `effort` for a rare, deliberate
 exception (e.g. forcing `xhigh` on one unusually hard agent *inside* a wide
 layer).
@@ -656,7 +659,7 @@ run-workflow <script.js>
   --frontier       pin ALL agents to the auto-detected latest frontier model (recommended; overrides per-call model)
   --pin-model M    pin ALL agents to model M (overrides per-call model)
   --model M        fallback model when not pinned; Claude ids/aliases auto-map
-  --effort E       none|minimal|low|medium|high|xhigh; flat fallback; unset → Codex config default
+  --effort E       none|minimal|low|medium|high|xhigh; flat fallback; unset → user config or model default
   --auto-effort    scale effort to layer width: 1→xhigh, 2+→high (floor) (recommended; overrides --effort)
   --pin-effort E   force ALL agents to effort E (overrides per-call effort)
   --sandbox S      read-only | workspace-write | danger-full-access  (default workspace-write)
@@ -696,9 +699,10 @@ run-workflow <script.js>
 - **Sizing `--budget`** — it is a *hard ceiling that throws mid-run*, not an
   advisory: size it for the **whole fan-out**, not one agent. Run **`--plan`**
   first — a no-token dry run that counts agents per phase/effort and prints an
-  estimated `--budget` (a lower bound for fan-outs sized from agent output). Rule
-  of thumb: medium-effort frontier (`gpt-5.5`) spends **~0.3–0.5M tokens/agent**
-  (reasoning included), so an N-agent run wants `--budget ≈ N × 500k` with
+  estimated `--budget` (a lower bound for fan-outs sized from agent output).
+  Based on the existing GPT-5.5 measurements, a medium-effort frontier run spent
+  **~0.3–0.5M tokens/agent** (reasoning included), so an N-agent run wants
+  `--budget ≈ N × 500k` with
   headroom. (A 35-agent run blew past an 8M ceiling after only ~17 agents.)
   **Read-heavy agents break the per-effort estimate**: an agent that reads a
   repo/corpus costs ~400–600k *even at `--effort low`* (input dominates) — cost
@@ -708,10 +712,11 @@ run-workflow <script.js>
 - **Effort (important)** — prefer **`--auto-effort`**, which sets each agent's
   effort from its layer's parallel width (1→`xhigh`, 2+→`high`; the floor is
   `high`; see *Effort*). Otherwise the runner only sends an effort when you set one (per-call
-  `effort` or `--effort`); when **nothing** is set, each agent inherits the Codex
-  config default — `model_reasoning_effort` in `~/.codex/config.toml`, currently
-  `xhigh` — so an effort-less workflow runs **every** agent at the highest tier
-  (slow and token-heavy across a fan-out). So for any multi-agent run, pass
+  `effort` or `--effort`); when **nothing** is set, each agent inherits an explicit
+  `model_reasoning_effort` from the user's Codex config, or the selected model's
+  catalog default when that setting is absent. GPT-5.6 Sol's catalog default is
+  `low`, so unspecified effort does **not** universally mean `xhigh`. For any
+  multi-agent run, pass
   `--auto-effort` (best) or at least a flat `--effort`; never leave effort
   unspecified.
 - **Resume** — every run journals each completed `agent()` result. If a run is
@@ -728,8 +733,10 @@ run-workflow <script.js>
   The *agents* do all file/command I/O (via the Codex sandbox). Don't write a
   script that tries to read files itself — have an `agent()` do it.
 - **Model mapping** — a script that requests `claude-opus-4-8` or a bare
-  `opus`/`sonnet`/`haiku` is remapped to an available Codex model. Don't rely on
-  that: pin every agent with `--frontier` (or `--pin-model gpt-5.5`) — see
+  `opus`/`sonnet`/`haiku` maps Opus → Sol, Sonnet → Terra, and Haiku → Luna when
+  those GPT-5.6 Codex tiers are available, with an available-model fallback.
+  Don't rely on that: pin every agent with `--frontier` (or
+  `--pin-model gpt-5.6-sol`) — see
   *Model*. (`--model` is only the *fallback* default; a per-call `model` in the
   script overrides it, so it does NOT guarantee one model for every agent.)
 - **Determinism** — `Math.random()`, `Date.now()`, and argless `new Date()` are
