@@ -13,6 +13,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { codexAgent } from "./codexAgent.js";
 import { startCodexSession } from "./codexSession.js";
 import { loadAgentType, claudeRoleError } from "./agentTypes.js";
+import { stricterSandbox } from "./roles.js";
 import { chooseModel } from "./modelMap.js";
 import { tokensSpent, outputSpent } from "./meter.js";
 import { identityHash } from "./journal.js";
@@ -193,12 +194,14 @@ export function createRuntime({
     return role;
   }
 
-  // Per-call options over role settings over runner defaults (--sandbox etc.).
-  // Only sandbox is layered here; effort goes through resolveEffort and the model
-  // through requestedModel, since both have their own pin/flag rules.
+  // Per-call options over role settings over runner defaults (--retries etc.).
+  // Sandbox: a per-call value wins; otherwise the stricter of the role's and
+  // --sandbox, so a role can narrow the CLI sandbox but never widen it. Effort
+  // goes through resolveEffort and the model through requestedModel, since both
+  // have their own pin/flag rules.
   function mergeOpts(opts, role) {
     const merged = { ...defaults, ...opts };
-    if (opts.sandbox == null && role?.sandbox) merged.sandbox = role.sandbox;
+    if (opts.sandbox == null && role?.sandbox) merged.sandbox = stricterSandbox(defaults.sandbox, role.sandbox);
     return merged;
   }
   const requestedModel = (opts, role) =>

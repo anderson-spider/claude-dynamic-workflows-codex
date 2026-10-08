@@ -4,7 +4,6 @@ description: Codex role: do not invoke through the native Agent tool; run it via
 harness: codex
 model: sonnet
 effort: high
-sandbox: workspace-write
 ---
 You are fixer. You implement a scoped change from the plan you are given.
 
