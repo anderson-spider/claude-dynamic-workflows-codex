@@ -1,6 +1,6 @@
 # Pantheon: mod do Claude Code no estilo oh-my-opencode-slim
 
-Data: 2026-10-08 · Branch: `andersonsilva/pantheon-mod` · Revisão 3 (após duas revisões
+Data: 2026-10-08 · Branch: `andersonsilva/pantheon-mod` · Revisão 4 (após três revisões
 independentes do spec)
 
 ## Objetivo
@@ -106,7 +106,9 @@ normais da sessão.
 Um registro não pode ser desfeito durante a sessão. Por isso um hook `agent.offer` lê a
 config vigente e esconde do modelo todo `pantheon:*` que esteja em `disabledAgents`, que
 pertença a um seat removido ou com o council desligado. Agentes já em execução não são
-afetados.
+afetados. A decisão é tomada antes de chamar `next`, e o hook tem um `.catch` que
+devolve `{ isOffered: false }` para `pantheon:*`: se a guarda falhar ou estourar o
+orçamento, o agente fica escondido em vez de passar (a API deixa passar por padrão).
 
 ## Configuração
 
@@ -194,6 +196,12 @@ Registradas com `$.tool.register`, `isDeferred: false`. Atendem só papéis Code
   `resume`, para que raízes graváveis extras herdadas do `config.toml` do usuário não
   ampliem a escrita além do `cwd`. `/tmp` e `$TMPDIR` continuam graváveis (padrão do
   Codex), porque testes e builds dependem deles.
+- Toda execução passa `--ignore-rules`, no `exec` e no `resume`: uma regra
+  `decision = "allow"` em `.rules` do usuário ou do projeto roda comandos fora do
+  sandbox e furaria o teto e o `noNetwork`. Custo aceito: regras `forbidden` do usuário
+  também deixam de valer dentro do Pantheon; o sandbox continua valendo.
+- `workspace-write` deixa `.git` somente leitura, então papéis Codex não fazem commit.
+  Commits são do orchestrator.
 
 ## Fluxo de uma delegação
 
@@ -204,7 +212,8 @@ Registradas com `$.tool.register`, `isDeferred: false`. Atendem só papéis Code
 3. `$.process.spawn({ argv, cwd, input })`:
    - novo: `codex exec --json -s <sandbox> [-m <model>] [-c model_reasoning_effort=<e>]
      -c sandbox_workspace_write.writable_roots=[]
-     [-c sandbox_workspace_write.network_access=false] [--skip-git-repo-check] -`
+     [-c sandbox_workspace_write.network_access=false] --ignore-rules
+     [--skip-git-repo-check] -`
    - resume: as mesmas opções de `exec` **antes** do subcomando, depois
      `resume <sessionId> -` (o subcomando `resume` não aceita `-s`).
 4. Eventos (amostra real):
@@ -306,6 +315,11 @@ Regras do bloco:
   diff e SHAs), porque o oracle não tem Bash.
 - O implementer Codex continua uma tarefa por `resume` (jobId); sem isso, segue o
   fallback da skill (novo implementer com brief, relatório e achados).
+- Commits: o sandbox do Codex não deixa o fixer commitar (`.git` é somente leitura).
+  O fixer implementa, testa e entrega o relatório sem commit; o orchestrator faz o
+  commit, registra o SHA e então gera o pacote de revisão (BASE gravado antes do
+  despacho, HEAD = esse commit). O prompt do fixer nesse despacho diz que a ausência de
+  commit é esperada e não é motivo para reportar BLOCKED.
 - Papel desligado sai da tabela; a skill usa o Agent tool padrão naquele caso.
 
 ## Painel e comandos
@@ -335,14 +349,17 @@ rodando com `claude plugin test` (`claude-code/testing`):
   (projeto não afrouxa usuário); `danger-full-access` recusado; config inválida bloqueia
   `delegate` e mantém a última política válida.
 - `offer.test.ts`: `pantheon:*` desligado, seat removido ou council desligado não é
-  oferecido; os demais são.
+  oferecido; os demais são; se a guarda lançar exceção ou estourar o orçamento, o
+  `pantheon:*` não é oferecido.
 - `roles.test.ts`: sandbox efetivo (porta dos casos de `runner/test/offline.js`),
   precedência chamada > papel > padrão para modelo e effort; nativo em `delegate` recusado
   com instrução; registros nativos refletem model/effort da config.
 - `workspace.test.ts`: `cwd` dentro e fora da raiz; symlink apontando para fora; resume
   ignora `cwd` novo.
+- `superpowers.test.ts` também cobre: o despacho do implementer diz que commit é do
+  orchestrator.
 - `codex.test.ts`: argv por combinação (sandbox, modelo, effort, `noNetwork`,
-  `--skip-git-repo-check`), `writable_roots=[]` sempre presente, resume com opções antes
+  `--skip-git-repo-check`), `writable_roots=[]` e `--ignore-rules` sempre presentes, resume com opções antes
   do subcomando; parser sobre
   `hooks/fixtures/codex-exec-sample.jsonl` e casos de erro.
 - `orchestrator.test.ts`: seção reflete papéis ativos; papel desligado some dos blocos e
