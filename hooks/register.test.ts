@@ -1,71 +1,7 @@
-import { describe, expect, mock, test } from 'claude-code/testing'
-import type { Engine } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import { describe, expect, test } from 'claude-code/testing'
 
 import type { Job } from '../types'
-
-import { CODEX_EXEC_SAMPLE } from './fixtures/codex-exec-sample'
-
-const DELEGATE = 'mcp__pantheon__delegate'
-const RESULT = 'mcp__pantheon__delegate_result'
-const HOME = '/home/u'
-const ROOT = '/repo'
-
-type World = {
-  files?: Record<string, string>
-  realPaths?: Record<string, string>
-  isRepo?: boolean
-  stdout?: string
-  exitCode?: number
-}
-
-function world(on: On, opts: World = {}) {
-  const seen = {
-    argv: [] as string[][],
-    cwds: [] as string[],
-    agents: [] as string[],
-    tools: [] as string[],
-    toasts: [] as string[],
-    submits: [] as string[],
-    gitRuns: 0,
-  }
-  const files = { ...(opts.files ?? {}) }
-  const clock = mock.clock(on)
-  mock.env(on, { HOME })
-  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
-  on('session.cwd', async () => ({ value: ROOT }))
-  on('process.run', async () => {
-    seen.gitRuns++
-    return opts.isRepo === false
-      ? { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
-      : { value: { exitCode: 0, stdout: `${ROOT}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-  })
-  on('fs.exists', async (_$, e) => ({ value: Object.hasOwn(files, e.path) }))
-  on('fs.read', async (_$, e) => ({ value: files[e.path] ?? '' }))
-  on('fs.stat', async (_$, e) => ({
-    value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false, realPath: opts.realPaths?.[e.path] ?? e.path },
-  }))
-  on('agent.register', async (_$, e) => { seen.agents.push(e.name); return { value: { agent: `pantheon:${e.name}` } } })
-  on('tool.register', async (_$, e) => { seen.tools.push(e.name); return { value: { tool: `mcp__pantheon__${e.name}` } } })
-  on('ui.toast', async (_$, e) => { seen.toasts.push(e.text); return { value: undefined } })
-  on('process.spawn', async function* (_$, e) {
-    seen.argv.push([...e.argv])
-    seen.cwds.push(e.cwd ?? '')
-    const text = opts.stdout ?? CODEX_EXEC_SAMPLE
-    if (text) yield { stream: 'stdout' as const, text }
-    return { value: { code: opts.exitCode ?? 0, signal: null } }
-  })
-  return { seen, files, clock }
-}
-
-async function start($: Engine) {
-  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
-}
-
-function parse(out: unknown): Record<string, unknown> {
-  const text = (out as { result?: unknown }).result
-  return JSON.parse(typeof text === 'string' ? text : JSON.stringify(text))
-}
+import { DELEGATE, HOME, RESULT, ROOT, parse, start, world } from './fixtures/world'
 
 describe('register', () => {
   test('session.start registers tools and native agents', async ($, on) => {
