@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { codexAgent } from "./codexAgent.js";
 import { startCodexSession } from "./codexSession.js";
+import { loadAgentType, claudeRoleError } from "./agentTypes.js";
 import { tokensSpent, outputSpent } from "./meter.js";
 import { identityHash } from "./journal.js";
 
@@ -144,6 +145,7 @@ export function createRuntime({
   runAgent = codexAgent, // seam: injected in tests to capture resolved opts
   startSession = startCodexSession, // seam: injected in tests for sessionful workers
   humanChannel = null, // interactive involvement: { notify(q), wait(id, {timeoutMs}) -> {answer}|undefined }
+  loadRole = loadAgentType, // seam: agentType -> role settings (frontmatter + roles.json)
 } = {}) {
   let agentCount = 0;
   let currentPhase = null; // last phase() title; the fallback when opts.phase is unset
@@ -168,19 +170,41 @@ export function createRuntime({
     }
   }
   // Thinking-effort policy in ONE place (used by agent() and sessions). Precedence
-  // (highest first): --pin-effort > per-call effort > --auto-effort (layer width) >
-  // --effort flag > Codex config default (effort omitted). Returns { effort, src }.
-  function resolveEffort(callOpts, width) {
+  // (highest first): --pin-effort > per-call effort > role (roles.json, then
+  // frontmatter) > --auto-effort (layer width) > --effort flag > Codex config
+  // default (effort omitted). Returns { effort, src }.
+  function resolveEffort(callOpts, width, role = null) {
     if (pinnedEffort != null) return { effort: pinnedEffort, src: "pin" };
     if (callOpts.effort != null) return { effort: callOpts.effort, src: "call" };
+    if (role?.effort != null) return { effort: role.effort, src: "role" };
     if (autoEffort) return { effort: effortForLayerWidth(width), src: "auto" };
     if (defaults.effort != null) return { effort: defaults.effort, src: "flag" };
     return { effort: undefined, src: "default" };
   }
 
+  // Role settings for opts.agentType, or null. A Claude-harness role is refused
+  // here, before any budget or model work, so --plan catches it too.
+  async function roleFor(opts) {
+    if (!opts.agentType) return null;
+    const role = await loadRole(opts.agentType, opts.cwd ?? process.cwd());
+    if (role?.harness === "claude") throw claudeRoleError(opts.agentType, role);
+    return role;
+  }
+
+  // Per-call options over role settings over runner defaults (--sandbox etc.).
+  // Only sandbox is layered here; effort goes through resolveEffort and the model
+  // through requestedModel, since both have their own pin/flag rules.
+  function mergeOpts(opts, role) {
+    const merged = { ...defaults, ...opts };
+    if (opts.sandbox == null && role?.sandbox) merged.sandbox = role.sandbox;
+    return merged;
+  }
+  const requestedModel = (opts, role) => pinnedModel ?? opts.model ?? role?.model ?? defaultModel;
+
   async function agent(prompt, opts = {}) {
     bumpAgentCount();
-    const merged = { ...defaults, ...opts };
+    const role = await roleFor(opts);
+    const merged = mergeOpts(opts, role);
     const label =
       opts.label || (typeof prompt === "string" ? prompt.slice(0, 64) : "agent");
     // Phase attribution: an explicit per-call `phase` wins (the reliable signal
@@ -191,13 +215,14 @@ export function createRuntime({
     // Resolve thinking effort. Precedence (highest first):
     //   pinnedEffort (--pin-effort)        authoritative, like --pin-model
     //   per-call opts.effort               the author's deliberate choice
+    //   role effort (roles.json/frontmatter) the agentType's setting
     //   layer-width policy (--auto-effort)  1->xhigh, >=2->high (floor)
     //   defaults.effort (--effort)         flat fallback
     //   undefined                          Codex config default (effort omitted)
     // The effective effort is written back onto `merged`, so it both reaches the
     // agent and participates in the journal identity (a policy change busts cache).
     const width = currentLayerWidth();
-    const { effort: resolvedEffort, src: effortSrc } = resolveEffort(opts, width);
+    const { effort: resolvedEffort, src: effortSrc } = resolveEffort(opts, width, role);
     if (resolvedEffort === undefined) delete merged.effort;
     else merged.effort = resolvedEffort;
 
@@ -212,11 +237,11 @@ export function createRuntime({
 
     // Resume journal: allocate a stable key (called on every run, even a cache
     // miss, to keep occurrence counters aligned) and short-circuit on a hit.
-    // Identity includes the *effective* model (pinned, else script opt, else CLI
-    // default) and effort (set above on `merged`) so a model/effort change busts
+    // Identity includes the *effective* model (pinned, else script opt, else the
+    // agentType's role model, else CLI default) and effort (set above on `merged`) so a model/effort change busts
     // the cache; --fresh forces a full re-run.
     const key = journal
-      ? journal.nextKey(prompt, { ...merged, model: pinnedModel ?? opts.model ?? defaultModel })
+      ? journal.nextKey(prompt, { ...merged, model: requestedModel(opts, role) })
       : null;
     if (key && journal.hit(key)) {
       onLog?.(`  ◦ agent (cached): ${label}`);
@@ -224,7 +249,7 @@ export function createRuntime({
       return journal.get(key);
     }
 
-    const reqModel = pinnedModel ?? opts.model ?? defaultModel ?? null;
+    const reqModel = requestedModel(opts, role) ?? null;
     const effortTag = merged.effort
       ? `  ⟪${merged.effort}${effortSrc === "auto" ? `·layer×${width}` : ""}⟫`
       : "";
@@ -583,12 +608,13 @@ export function createRuntime({
   }
 
   async function startLiveSession(prompt, opts = {}) {
-    const merged = { ...defaults, ...opts };
+    const role = await roleFor(opts);
+    const merged = mergeOpts(opts, role);
     const label = opts.label || (typeof prompt === "string" ? prompt.slice(0, 64) : "session");
     const phase = opts.phase ?? currentPhase ?? null;
     const width = currentLayerWidth();
-    const { effort } = resolveEffort(opts, width);
-    const reqModel = pinnedModel ?? opts.model ?? defaultModel ?? null;
+    const { effort } = resolveEffort(opts, width, role);
+    const reqModel = requestedModel(opts, role) ?? null;
     const id = `s${++sessionSeq}`;
 
     // Warm-context resume (--resume): a prior run journaled this worker's turns
@@ -705,8 +731,9 @@ export function createRuntime({
     const label = opts.label || (typeof prompt === "string" ? prompt.slice(0, 64) : "session");
     const phase = opts.phase ?? currentPhase ?? null;
     const width = currentLayerWidth();
-    const { effort } = resolveEffort(opts, width);
-    const reqModel = pinnedModel ?? opts.model ?? defaultModel ?? null;
+    const role = await roleFor(opts);
+    const { effort } = resolveEffort(opts, width, role);
+    const reqModel = requestedModel(opts, role) ?? null;
     const id = `s${++sessionSeq}`;
     bumpAgentCount();
     onAgentPlan?.({ label, phase, effort: effort ?? null, width, schema: !!opts.schema, kind: "session-start" });

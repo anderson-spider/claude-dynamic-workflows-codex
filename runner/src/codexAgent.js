@@ -12,7 +12,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { AppServerClient } from "./appServerClient.js";
 import { recordTokenUsage, tokensForThread } from "./meter.js";
 import { resolveModel, modelId } from "./modelMap.js";
-import { loadAgentType } from "./agentTypes.js";
+import { loadAgentType, claudeRoleError } from "./agentTypes.js";
 
 // Normalize an authored JSON Schema for OpenAI strict structured outputs, which
 // require EVERY property to be listed in `required` and `additionalProperties:false`
@@ -170,9 +170,14 @@ export async function codexAgent(prompt, opts = {}) {
   let agentTypeModel;
   if (opts.agentType) {
     const def = await loadAgentType(opts.agentType, opts.cwd ?? process.cwd());
+    if (def?.harness === "claude") throw claudeRoleError(opts.agentType, def);
     if (def) {
       if (!systemPrompt) systemPrompt = def.systemPrompt;
       agentTypeModel = def.model;
+      // Role settings fill in only what the caller left unset (the runtime has
+      // already layered them under per-call options; direct callers get the same).
+      if (opts.sandbox == null && def.sandbox) opts = { ...opts, sandbox: def.sandbox };
+      if (opts.effort == null && def.effort) opts = { ...opts, effort: def.effort };
     } else {
       log(`agentType '${opts.agentType}' not found — using default instructions`);
     }

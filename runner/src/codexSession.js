@@ -25,7 +25,7 @@ import {
   isRetryable,
 } from "./codexAgent.js";
 import { resolveModel } from "./modelMap.js";
-import { loadAgentType } from "./agentTypes.js";
+import { loadAgentType, claudeRoleError } from "./agentTypes.js";
 import { tokensForThread, markResumedThread } from "./meter.js";
 
 const DEFAULT_TURN_TIMEOUT_MS = 600_000; // the Codex per-turn cap (same as one-shot)
@@ -51,9 +51,13 @@ export async function startCodexSession(opts = {}) {
   let agentTypeModel;
   if (opts.agentType) {
     const def = await loadAgentType(opts.agentType, opts.cwd ?? process.cwd());
+    if (def?.harness === "claude") throw claudeRoleError(opts.agentType, def);
     if (def) {
       if (!systemPrompt) systemPrompt = def.systemPrompt;
       agentTypeModel = def.model;
+      // The role's sandbox fills in only when the caller left it unset (thread-level;
+      // per-turn effort is resolved by the runtime).
+      if (opts.sandbox == null && def.sandbox) opts = { ...opts, sandbox: def.sandbox };
     } else {
       log(`agentType '${opts.agentType}' not found — using default instructions`);
     }
