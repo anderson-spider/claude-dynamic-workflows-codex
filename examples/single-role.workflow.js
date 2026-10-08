@@ -1,6 +1,6 @@
 // One agent() on a team role, to measure the latency of a single call.
 // The role (scout | librarian | fixer) brings its system prompt, model, effort
-// and sandbox from .claude/agents/<role>.md and roles.json.
+// and sandbox (if it sets one) from .claude/agents/<role>.md and roles.json.
 //
 //   node runner/bin/run-workflow.js examples/single-role.workflow.js \
 //     --args '{"role":"scout","prompt":"Where is agentType resolved?"}'

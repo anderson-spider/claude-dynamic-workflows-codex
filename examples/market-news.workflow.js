@@ -2,14 +2,14 @@
 // parallel, then write one cited brief. (The blog's fan-out-and-synthesize pattern.)
 //
 // Needs the Codex agents to reach live data — either a web-search tool or a
-// network-enabled sandbox (run with `--sandbox danger-full-access`, or enable
-// network for workspace-write in your Codex config). Agents are told to fetch live
+// network-enabled sandbox (the runner's workspace-write has network unless you
+// pass --no-network). Agents are told to fetch live
 // and to mark clearly when a figure is from prior knowledge instead, so the brief
 // is honest either way. The sandboxed script can't read the clock, so the date
 // comes in via --args (demo-live injects today's date automatically).
 //
 //   node runner/bin/run-workflow.js examples/market-news.workflow.js --frontier --auto-effort \
-//     --sandbox danger-full-access --args '{"date":"June 3, 2026"}'
+//     --args '{"date":"June 3, 2026"}'
 
 export const meta = {
   name: "market-news",

@@ -87,10 +87,16 @@ rodam no frontier.
 
 **Sandbox.** Os papéis incluídos não definem `sandbox`: scout, librarian e fixer
 rodam com o sandbox do `agent()` ou do `--sandbox` (padrão `workspace-write`). Um
-`sandbox` no `roles.json` ou no frontmatter continua aceito, mas o `--sandbox`
-funciona como teto: vale o mais restritivo dos dois (`read-only` <
-`workspace-write` < `danger-full-access`). Um papel pode restringir o `--sandbox`,
-nunca ampliar. O `sandbox` passado no `agent()` vence os dois.
+`sandbox` no `roles.json` ou no frontmatter continua aceito. O `sandbox` passado no
+`agent()` vence o do papel, e o `--sandbox` funciona como teto para os dois: vale o
+mais restritivo (`read-only` < `workspace-write` < `danger-full-access`). Sem
+`--sandbox`, o teto é `workspace-write`; `danger-full-access` só com
+`--sandbox danger-full-access` explícito. Script e papel podem restringir o teto,
+nunca ampliar.
+
+**Rede.** No `workspace-write`, o runner liga o acesso à rede em todos os agentes,
+independente do `sandbox_workspace_write.network_access` do seu config do Codex.
+Use `--no-network` para desligar. O `read-only` continua sem rede.
 
 **Workflow mínimo** (uma chamada, para medir latência):
 
@@ -101,8 +107,8 @@ node runner/bin/summarize-run.js .workflow-journal/single-role.workflow.jsonl   
 ```
 
 > **Aviso.** As threads do Codex continuam com `approvalPolicy: "never"`: nenhum
-> comando pede aprovação. O sandbox (do `agent()`, do `--sandbox` ou de um
-> papel que o defina) é o único controle sobre o que o agente pode alterar.
+> comando pede aprovação. O sandbox (do `agent()` ou de um papel que o defina,
+> limitado pelo `--sandbox`) é o único controle sobre o que o agente pode alterar.
 
 ---
 
@@ -221,7 +227,7 @@ You don't manage flags; you describe what you want and Claude wires it up. Commo
 | **See the size/cost first** | "plan it first — how many agents, roughly how much?" | a **no-token dry run** (`--plan`) that counts agents per phase and estimates a budget |
 | **Cap the spend** | "keep it under ~5M tokens" | a hard `--budget` ceiling — tripping it isn't fatal, it prints a one-line `--resume` to continue |
 | **Keep it read-only (safety)** | "read-only — don't let agents write files" | runs every agent with `--sandbox read-only` — a **safety** choice (agents read but never write); good for audits, research, exploration. Not a way to spend less. |
-| **Let it edit files** | "let it apply the migration" | `--sandbox workspace-write` (the default) so agents can write |
+| **Let it edit files** | "let it apply the migration" | `--sandbox workspace-write` (also the ceiling without the flag) so agents can write |
 | **Resume after a stop** | "resume that run" | replays already-finished agents from the journal **free**, runs only the rest; sessionful workers re-attach to their persisted threads **warm** |
 | **Be asked before risky steps** | "check with me before applying anything" | authors a `human()` gate — the live viewer shows an **answer card** (choices + free text) right in the run page; the run waits there, fleet warm, and falls back to a safe default on timeout |
 | **Pick a specific pattern** | "do a loop-until-dry bug hunt" · "fresh-context review with independent reviewers" | authors that exact pattern (see the [pattern library](references/authoring.md)) |
@@ -649,7 +655,7 @@ Full internals, the protocol mapping, and a faithfulness comparison vs. the nati
 
 ## Safety
 
-Workflow agents run with `approvalPolicy: "never"` inside a Codex sandbox (default `sandbox: workspace-write`) — like any autonomous agent run, they read, write, and execute shell commands **without prompting**. For untrusted or exploratory tasks, tell Claude to keep it **read-only** (or pass `--sandbox read-only`), and read a workflow script before you run it. The workflow *script itself* is isolated (no filesystem/network/process access) — only the agents act.
+Workflow agents run with `approvalPolicy: "never"` inside a Codex sandbox (default `sandbox: workspace-write`, with network access on unless `--no-network`) — like any autonomous agent run, they read, write, and execute shell commands **without prompting**. For untrusted or exploratory tasks, tell Claude to keep it **read-only** (or pass `--sandbox read-only`), and read a workflow script before you run it. The workflow *script itself* is isolated (no filesystem/network/process access) — only the agents act.
 
 ## Limitations (honest)
 

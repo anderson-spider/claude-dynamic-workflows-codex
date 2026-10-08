@@ -120,7 +120,10 @@ run-workflow <script.js>
   --effort E          none|minimal|low|medium|high|xhigh (flat fallback; unset inherits user config/model default)
   --auto-effort       scale effort to each layer's parallel width: 1->xhigh, 2+->high (floor)
   --pin-effort E      force ALL agents to effort E (overrides per-call effort)
-  --sandbox S         read-only | workspace-write | danger-full-access
+  --sandbox S         read-only | workspace-write | danger-full-access (a ceiling: per-call
+                      and role sandboxes can narrow it, never widen it; default workspace-write)
+  --no-network        turn off network access for workspace-write agents (on by default,
+                      whatever sandbox_workspace_write.network_access says in the Codex config)
   --retries N         transient-error retries per agent (default 3)
   --resume            reuse prior results from the journal (skip unchanged agents)
   --journal PATH      journal location (default .workflow-journal/<script>.jsonl)
@@ -412,10 +415,16 @@ A persisted script written for Claude Code rarely needs editing to run here:
 
 `schema`, `model`, `agentType`, `effort`, `sandbox`, `cwd`, `systemPrompt`,
 `personality`, `isolation`, `retries`, `timeoutMs`, `label`, `phase`. Per-call `opts`
-override the CLI `--model/--effort/--sandbox/--retries` defaults — except that
+override the CLI `--model/--effort/--retries` defaults — except that
 `--pin-model` forces the model, `--frontier` forces it for every agent without an
 `agentType` role model, and `--pin-effort` forces the effort regardless of `opts`. A per-call `effort` overrides `--auto-effort` (so omit it
 unless you deliberately want to escape the layer-width policy for one agent).
+`--sandbox` is a ceiling: a per-call or role `sandbox` applies only where it is
+at least as strict (`read-only` < `workspace-write` < `danger-full-access`).
+Without `--sandbox` the ceiling is `workspace-write`, so `danger-full-access`
+needs an explicit `--sandbox danger-full-access`. Direct callers of
+`codexAgent`/`startCodexSession` get the same rule through `sandboxCap` (default
+`workspace-write`) and can pass `networkAccess` to override the Codex config.
 
 ## Implemented vs. extension points
 
