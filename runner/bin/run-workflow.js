@@ -108,8 +108,9 @@ if (opts.help || !opts.script) {
       "                   question goes pending and when the run ends; the event JSON\n" +
       "                   is in $WORKFLOW_EVENT. Implies --interactive. e.g. macOS:\n" +
       "                   --notify-cmd 'osascript -e \"display notification \\\"$WORKFLOW_EVENT\\\"\"'\n" +
-      "  --frontier       pin ALL agents to the latest frontier model (auto-detected),\n" +
-      "                   overriding any per-call model in the script\n" +
+      "  --frontier       run agents on the latest frontier model (auto-detected),\n" +
+      "                   overriding any per-call model in the script; an agentType\n" +
+      "                   role keeps its own model (frontmatter / roles.json)\n" +
       "  --pin-model M    pin ALL agents to model M, overriding any per-call model\n" +
       "  --auto-effort    scale thinking effort to each layer's parallel width:\n" +
       "                   1 agent->xhigh, 2+ agents->high (floor). Critical single-agent\n" +
@@ -264,26 +265,30 @@ if (opts.plan) {
   process.exit(0);
 }
 
-// `pinnedModel` (from --frontier or --pin-model) is authoritative: every agent
-// uses it, overriding any per-call `model` a script sets. --frontier auto-detects
-// the latest frontier model from model/list (warming the shared connection).
-let pinnedModel = opts.pinModel ?? undefined;
-if (opts.frontier) {
+// `pinnedModel` (--pin-model) is authoritative: every agent uses it, overriding
+// any per-call `model` and any agentType role model. `frontierModel` (--frontier)
+// auto-detects the latest frontier model from model/list (warming the shared
+// connection); it overrides a script's per-call `model` but yields to the model
+// of an agentType role (frontmatter / roles.json). See chooseModel in modelMap.js.
+const pinnedModel = opts.pinModel ?? undefined;
+let frontierModel;
+if (opts.frontier && !pinnedModel) {
   try {
     const client = await getClient();
-    pinnedModel = pickFrontier(await client.listModels());
+    frontierModel = pickFrontier(await client.listModels());
   } catch (e) {
     console.error("--frontier preflight failed:", e?.message ?? e);
     await shutdownClient();
     process.exit(1);
   }
-  if (!pinnedModel) {
+  if (!frontierModel) {
     console.error("--frontier: could not determine a frontier model from model/list");
     await shutdownClient();
     process.exit(1);
   }
 }
 if (pinnedModel) console.error(`⊙ pinning all agents to model: ${pinnedModel}`);
+if (frontierModel) console.error(`⊙ frontier model: ${frontierModel} (agentType roles keep their own model)`);
 
 // Resume journal: on by default (write-only); --resume reuses prior results,
 // --no-journal disables, --journal overrides the path, --fresh discards first.
@@ -327,7 +332,7 @@ if (!opts.noJournal) {
     writeFileSync(runMetaPathFor(journalPath), JSON.stringify({
       budget: opts.budget ?? null,
       budgetMeter: opts.budgetMeter,
-      model: pinnedModel ?? defaultModel ?? null,
+      model: pinnedModel ?? frontierModel ?? defaultModel ?? null,
       autoEffort: opts.autoEffort,
       pinEffort: pinnedEffort,
       sandbox: opts.sandbox ?? null,
@@ -472,6 +477,7 @@ try {
     defaults,
     defaultModel,
     pinnedModel,
+    frontierModel,
     autoEffort: opts.autoEffort,
     pinnedEffort,
     onPhase,

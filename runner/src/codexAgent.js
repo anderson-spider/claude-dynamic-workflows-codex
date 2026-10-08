@@ -11,7 +11,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { AppServerClient } from "./appServerClient.js";
 import { recordTokenUsage, tokensForThread } from "./meter.js";
-import { resolveModel, modelId } from "./modelMap.js";
+import { resolveModel, modelId, chooseModel } from "./modelMap.js";
 import { loadAgentType, claudeRoleError } from "./agentTypes.js";
 
 // Normalize an authored JSON Schema for OpenAI strict structured outputs, which
@@ -182,12 +182,16 @@ export async function codexAgent(prompt, opts = {}) {
       log(`agentType '${opts.agentType}' not found — using default instructions`);
     }
   }
-  // `pinnedModel` is authoritative: it overrides a per-call `model`, an
-  // agentType model, and the CLI default — forcing every agent onto one model.
-  if (opts.pinnedModel && opts.model && opts.model !== opts.pinnedModel) {
-    log(`pinned model '${opts.pinnedModel}' overrides per-call model '${opts.model}'`);
+  // `pinnedModel` (--pin-model) is authoritative: it overrides a per-call `model`,
+  // an agentType model, and the CLI default. `frontierModel` (--frontier) overrides
+  // a per-call `model` but yields to the agentType's model (see chooseModel).
+  const requestedModel = chooseModel({
+    pinnedModel: opts.pinnedModel, frontierModel: opts.frontierModel,
+    callModel: opts.model, roleModel: agentTypeModel, defaultModel: opts.defaultModel,
+  });
+  if (opts.model && requestedModel !== opts.model) {
+    log(`${opts.pinnedModel ? "pinned" : "frontier"} model '${requestedModel}' overrides per-call model '${opts.model}'`);
   }
-  const requestedModel = opts.pinnedModel ?? opts.model ?? agentTypeModel ?? opts.defaultModel;
 
   // Worktree isolation is set up once and reused across retry attempts.
   let cwd = opts.cwd ?? process.cwd();

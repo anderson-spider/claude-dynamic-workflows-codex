@@ -24,7 +24,7 @@ import {
   parseSchemaResult,
   isRetryable,
 } from "./codexAgent.js";
-import { resolveModel } from "./modelMap.js";
+import { resolveModel, chooseModel } from "./modelMap.js";
 import { loadAgentType, claudeRoleError } from "./agentTypes.js";
 import { tokensForThread, markResumedThread } from "./meter.js";
 
@@ -62,8 +62,11 @@ export async function startCodexSession(opts = {}) {
       log(`agentType '${opts.agentType}' not found — using default instructions`);
     }
   }
-  // pinnedModel is authoritative (forces every agent onto one model), same as agent().
-  const requestedModel = opts.pinnedModel ?? opts.model ?? agentTypeModel ?? opts.defaultModel;
+  // Same model rule as agent(): --pin-model wins; --frontier yields to the role's model.
+  const requestedModel = chooseModel({
+    pinnedModel: opts.pinnedModel, frontierModel: opts.frontierModel,
+    callModel: opts.model, roleModel: agentTypeModel, defaultModel: opts.defaultModel,
+  });
 
   // Worktree isolation: created once, kept across every follow-up turn, removed
   // only by cleanup() (session.close / runtime finalization) — never per-turn.

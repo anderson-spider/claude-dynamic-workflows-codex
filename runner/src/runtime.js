@@ -13,6 +13,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { codexAgent } from "./codexAgent.js";
 import { startCodexSession } from "./codexSession.js";
 import { loadAgentType, claudeRoleError } from "./agentTypes.js";
+import { chooseModel } from "./modelMap.js";
 import { tokensSpent, outputSpent } from "./meter.js";
 import { identityHash } from "./journal.js";
 
@@ -133,6 +134,7 @@ export function createRuntime({
   defaults = {},
   defaultModel,
   pinnedModel,
+  frontierModel, // --frontier: default for agents without a role model (see chooseModel)
   autoEffort = false,
   pinnedEffort = null,
   plan = false, // --plan dry run: count agents, never call a model
@@ -199,7 +201,8 @@ export function createRuntime({
     if (opts.sandbox == null && role?.sandbox) merged.sandbox = role.sandbox;
     return merged;
   }
-  const requestedModel = (opts, role) => pinnedModel ?? opts.model ?? role?.model ?? defaultModel;
+  const requestedModel = (opts, role) =>
+    chooseModel({ pinnedModel, frontierModel, callModel: opts.model, roleModel: role?.model, defaultModel });
 
   async function agent(prompt, opts = {}) {
     bumpAgentCount();
@@ -263,7 +266,7 @@ export function createRuntime({
     let metrics = null;
     const result = await pooled(() =>
       runAgent(prompt, {
-        ...merged, defaultModel, pinnedModel, log: onLog,
+        ...merged, defaultModel, pinnedModel, frontierModel, log: onLog,
         onMetrics: (m) => { metrics = m; },
         onProgress: onProgress ? (text) => onProgress(label, text, key) : undefined,
       }),
@@ -364,6 +367,7 @@ export function createRuntime({
       defaults,
       defaultModel,
       pinnedModel,
+      frontierModel,
       autoEffort,
       pinnedEffort,
       plan,
@@ -643,7 +647,7 @@ export function createRuntime({
 
     let driver;
     try {
-      driver = await startSession({ ...merged, defaultModel, pinnedModel, log: onLog, resumeThreadId: resumeThreadId ?? undefined });
+      driver = await startSession({ ...merged, defaultModel, pinnedModel, frontierModel, log: onLog, resumeThreadId: resumeThreadId ?? undefined });
     } catch (e) {
       release();
       throw e;

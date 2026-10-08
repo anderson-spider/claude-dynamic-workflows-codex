@@ -14,7 +14,7 @@ import { effortForLayerWidth, schemaSkeleton, createRuntime, __activeSlots } fro
 import { isGitRepo, createWorktree } from "../src/worktree.js";
 import { identityHash, Journal } from "../src/journal.js";
 import { liveState, buildRunModel, locateRun, listJournals } from "../src/runModel.js";
-import { resolveModel, pickFrontier } from "../src/modelMap.js";
+import { resolveModel, pickFrontier, chooseModel } from "../src/modelMap.js";
 import { loadAgentType } from "../src/agentTypes.js";
 import { RoleConfigError, validateRolesFile } from "../src/roles.js";
 import { buildThreadParams } from "../src/codexAgent.js";
@@ -147,6 +147,14 @@ const exec = promisify(execFile);
   assert.equal(resolveModel("sonnet", have), "gpt-5.6-terra", "sonnet -> Terra");
   assert.equal(resolveModel("haiku", have), "gpt-5.6-luna", "haiku -> Luna");
   assert.equal(resolveModel("gpt-5.6", have), "gpt-5.6-sol", "family alias -> explicit App Server id");
+  // chooseModel: the requested-model rule shared by the runtime, agent() and sessions.
+  const m = { callModel: "gpt-5.4", roleModel: "haiku", defaultModel: "gpt-5.2" };
+  assert.equal(chooseModel(m), "gpt-5.4", "no pin/frontier: per-call model first");
+  assert.equal(chooseModel({ ...m, callModel: undefined }), "haiku", "then the role model");
+  assert.equal(chooseModel({ defaultModel: "gpt-5.2" }), "gpt-5.2", "then --model");
+  assert.equal(chooseModel({ ...m, frontierModel: "gpt-6-sol" }), "haiku", "--frontier yields to the role model");
+  assert.equal(chooseModel({ ...m, roleModel: undefined, frontierModel: "gpt-6-sol" }), "gpt-6-sol", "--frontier overrides per-call model");
+  assert.equal(chooseModel({ ...m, frontierModel: "gpt-6-sol", pinnedModel: "gpt-6-astra" }), "gpt-6-astra", "--pin-model wins over all");
   assert.equal(resolveModel("gpt-5.4", have), "gpt-5.4", "available id passes through");
   assert.equal(resolveModel("inherit", have), undefined, "inherit -> config default");
   assert.equal(resolveModel(undefined, have), undefined, "undefined -> config default");
@@ -377,6 +385,17 @@ const SCOUT_MD = "---\nname: scout\nharness: codex\nmodel: haiku\neffort: medium
     await models('await agent("a", { agentType: "scout" });', { pinnedModel: "gpt-6-astra" }),
     ["gpt-6-astra"],
     "--pin-model over role",
+  );
+  // --frontier: a role keeps its model; per-call and role-less agents get the frontier.
+  assert.deepEqual(
+    await models('await agent("a", { agentType: "scout" }); await agent("b", { model: "gpt-5.4" }); await agent("c");', { frontierModel: "gpt-6-sol", defaultModel: "gpt-5.2" }),
+    ["haiku", "gpt-6-sol", "gpt-6-sol"],
+    "--frontier yields to the role model, overrides per-call and --model",
+  );
+  assert.deepEqual(
+    await models('await agent("a", { agentType: "scout" });', { pinnedModel: "gpt-6-astra", frontierModel: "gpt-6-sol" }),
+    ["gpt-6-astra"],
+    "--pin-model beats --frontier and the role",
   );
 
   // Claude roles are refused, in --plan too, with a pointer to the Agent tool.

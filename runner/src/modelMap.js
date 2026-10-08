@@ -32,6 +32,21 @@ function claudeFamily(id) {
 }
 
 /**
+ * Pick the model an agent requests, before Codex-catalog resolution. One place,
+ * shared by the runtime (journal identity, events) and the agent/session drivers.
+ *   --pin-model                -> always the pin
+ *   --frontier                 -> the role's model if the agentType sets one, else
+ *                                 the frontier (a script's per-call `model` is still
+ *                                 overridden, so stale ids in authored scripts lose)
+ *   neither                    -> per-call model > role model > --model default
+ */
+export function chooseModel({ pinnedModel, frontierModel, callModel, roleModel, defaultModel } = {}) {
+  if (pinnedModel) return pinnedModel;
+  if (frontierModel) return roleModel ?? frontierModel;
+  return callModel ?? roleModel ?? defaultModel;
+}
+
+/**
  * Resolve `requested` to a Codex model id (or undefined to use Codex's config
  * default).
  *   undefined / "inherit" / "default" -> undefined
