@@ -158,9 +158,13 @@ export const register: Register = on => {
       lastValid = state.config
       toastedError = undefined
       await registerNatives(io, state.config)
-    } else if (state.error !== toastedError) {
-      toastedError = state.error
-      io.toast(`pantheon: config inválida — ${state.error}`)
+    } else {
+      // Sem nenhuma config válida até aqui, os nativos ficam com os padrões.
+      if (!lastValid) await registerNatives(io, state.config)
+      if (state.error !== toastedError) {
+        toastedError = state.error
+        io.toast(`pantheon: config inválida — ${state.error}`)
+      }
     }
     return state
   }
@@ -168,14 +172,19 @@ export const register: Register = on => {
   async function registerNatives(io: Io, config: PantheonConfig) {
     const key = JSON.stringify(config)
     if (key === registeredKey) return
-    registeredKey = key
-    for (const spec of nativeAgentSpecs(config, rolePrompt)) {
-      await io.registerAgent({
-        name: spec.name, description: spec.description, prompt: spec.prompt,
-        ...(spec.model ? { model: spec.model } : {}),
-        ...(spec.effort ? { effort: spec.effort } : {}),
-        ...(spec.tools ? { tools: spec.tools } : {}),
-      })
+    try {
+      for (const spec of nativeAgentSpecs(config, rolePrompt)) {
+        await io.registerAgent({
+          name: spec.name, description: spec.description, prompt: spec.prompt,
+          ...(spec.model ? { model: spec.model } : {}),
+          ...(spec.effort ? { effort: spec.effort } : {}),
+          ...(spec.tools ? { tools: spec.tools } : {}),
+        })
+      }
+      // Só marca como registrado depois de todos: uma falha é tentada de novo no próximo turno.
+      registeredKey = key
+    } catch (error) {
+      io.toast(`pantheon: falha ao registrar agentes nativos: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 

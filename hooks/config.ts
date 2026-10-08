@@ -81,7 +81,8 @@ function validate(value: unknown): ConfigLayer {
         const prefix = `council.seats.${name}`
         const seat = object(raw, prefix)
         knownKeys(seat, ['engine', 'model', 'effort', 'prompt'], `${prefix}.`)
-        if (seat.engine !== 'codex' && seat.engine !== 'claude') {
+        // engine é opcional por camada (override parcial); o seat efetivo precisa de um.
+        if (Object.hasOwn(seat, 'engine') && seat.engine !== 'codex' && seat.engine !== 'claude') {
           throw new Error(`${prefix}.engine: esperado codex ou claude`)
         }
         strings(seat, prefix)
@@ -155,6 +156,11 @@ export async function loadConfig(
         throw new Error('JSON inválido')
       }
       merge(config, validate(parsed), origins, origin)
+      for (const [name, seat] of Object.entries(config.council.seats)) {
+        if (seat.engine !== 'codex' && seat.engine !== 'claude') {
+          throw new Error(`council.seats.${name}.engine: esperado codex ou claude`)
+        }
+      }
     } catch (error) {
       return {
         ok: false,

@@ -150,7 +150,7 @@ describe('loadConfig', () => {
     ['non object council', '{"council":false}', 'council'],
     ['non object seats', '{"council":{"seats":[]}}', 'council.seats'],
     ['null seat', '{"council":{"seats":{"gamma":null}}}', 'council.seats.gamma'],
-    ['missing seat engine', '{"council":{"seats":{"alpha":{"model":"x"}}}}', 'council.seats.alpha.engine'],
+    ['missing engine on a new seat', '{"council":{"seats":{"gamma":{"model":"x"}}}}', 'council.seats.gamma.engine'],
     ['invalid seat engine', '{"council":{"seats":{"alpha":{"engine":"other"}}}}', 'council.seats.alpha.engine'],
     ['non string seat model', '{"council":{"seats":{"alpha":{"engine":"codex","model":2}}}}', 'council.seats.alpha.model'],
     ['non string seat effort', '{"council":{"seats":{"alpha":{"engine":"codex","effort":null}}}}', 'council.seats.alpha.effort'],
@@ -233,4 +233,10 @@ describe('loadConfig', () => {
     expect(DEFAULT_CONFIG.council.seats.alpha?.model).toBe('gpt-6-astra')
     expect(DEFAULT_CONFIG.disabledAgents).toEqual([])
   })
+})
+
+test('partial override of an existing seat keeps its engine', async () => {
+  const result = await loadConfig(readFiles({ u: '{"council":{"seats":{"alpha":{"effort":"low"}}}}' }), { user: 'u' })
+  expect(result.ok).toBe(true)
+  expect(result.config.council.seats.alpha).toEqual({ engine: 'codex', model: 'gpt-6-astra', effort: 'low' })
 })

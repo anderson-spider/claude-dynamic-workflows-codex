@@ -51,6 +51,8 @@ export function createJobs(deps: Deps) {
       id: deps.newId(), agent: call.agent, model: call.model, description: opts.description,
       status: opts.background ? 'background' : 'running',
       startedAt: await deps.clock.now(), cwd: call.cwd,
+      // Um resume já nasce dono da sessão Codex, para que ela não seja retomada duas vezes.
+      ...(call.resumeSessionId ? { sessionId: call.resumeSessionId } : {}),
     }
     jobs.push(job)
     changed()
@@ -186,6 +188,8 @@ export function createJobs(deps: Deps) {
       if (!job.sessionId) {
         return { error: `Job ${id} morreu antes de o Codex abrir a sessão; é preciso delegar de novo.` }
       }
+      const busy = jobs.find(other => other.sessionId === job.sessionId && active(other))
+      if (busy) return { error: `A sessão Codex do job ${id} já está em uso pelo job ${busy.id}; aguarde ou cancele antes de retomar.` }
       return { sessionId: job.sessionId, cwd: job.cwd, agent: job.agent }
     },
   }

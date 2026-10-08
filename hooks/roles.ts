@@ -19,6 +19,11 @@ function seatDisabled(config: PantheonConfig, seat: string): boolean {
     config.disabledAgents.includes(`councillor-${seat}`)
 }
 
+/** Seats que o council usa: não desligados (nem o council inteiro), em ordem de nome. */
+export function activeSeats(config: PantheonConfig): string[] {
+  return Object.keys(config.council.seats).filter(name => !seatDisabled(config, name)).sort()
+}
+
 function validCodexAgents(config: PantheonConfig): string[] {
   return [
     ...CODEX_ROLES.filter(role => !config.disabledAgents.includes(role)),

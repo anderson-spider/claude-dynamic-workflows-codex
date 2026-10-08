@@ -185,4 +185,19 @@ describe('register', () => {
     expect(done.status).toBe('done')
     expect(texts.some(text => text.includes(String(out.jobId)) && text.includes('delegate_result'))).toBe(true)
   })
+
+  test('invalid first config still registers the default native agents', async ($, on) => {
+    const { seen } = world(on, { files: { [`${HOME}/.claude/pantheon.json`]: '{ nope' } })
+    await start($)
+    expect(seen.agents).toEqual(['oracle', 'designer', 'councillor-beta'])
+  })
+
+  test('a failed native registration is retried on the next turn', async ($, on) => {
+    const { seen } = world(on, { failFirstRegister: true })
+    on('prompt.compose', async () => ({ sections: [] }))
+    await start($)
+    expect(seen.tools).toEqual(['delegate', 'delegate_result', 'delegate_cancel'])
+    await $.prompt.compose({ model: 'm', promptModel: 'm', surfaces: [], tools: [], outputStyle: null, traits: [] } as never)
+    expect(seen.agents).toEqual(['oracle', 'designer', 'councillor-beta'])
+  })
 })

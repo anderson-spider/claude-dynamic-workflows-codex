@@ -69,3 +69,11 @@ describe('council block', () => {
     expect(buildCouncilBlock({ ...DEFAULT_CONFIG, council: { seats: {} } })).toBe('')
   })
 })
+
+test('disabled seat is left out of the dispatch and the orchestrator line', () => {
+  const config = { ...DEFAULT_CONFIG, disabledAgents: ['councillor:alpha'] }
+  const block = buildCouncilBlock(config)
+  expect(block).not.toContain('councillor:alpha')
+  expect(block).toContain('pantheon:councillor-beta')
+  expect(buildOrchestratorSection(config)).not.toContain('councillor:alpha')
+})

@@ -1,3 +1,4 @@
+import { activeSeats } from '../roles'
 import type { PantheonConfig } from '../types'
 
 const COUNCIL_TRIGGER = /\b(?:councillors?|councils?|consensus|second opinions?|roundtable|multiple opinions|multiple models|several models|multi-model|conselho|consenso|segunda opini[aã]o)\b|议会|顾问团|圆桌|共识|第二意见|多方意见|多模型|多个模型|几个模型|别的模型|其他模型/i
@@ -35,8 +36,8 @@ export function isCouncilOrigin(kind: string | undefined): boolean {
 }
 
 export function buildCouncilBlock(config: PantheonConfig): string {
-  const seats = Object.keys(config.council.seats).sort()
-  if (config.disabledAgents.includes('council') || seats.length === 0) return ''
+  const seats = activeSeats(config)
+  if (seats.length === 0) return ''
   const calls = seats.map(name => config.council.seats[name]?.engine === 'codex'
     ? `   - ${name}: delegate({ agent: "councillor:${name}", background: true, prompt: <user task + fetched context> })`
     : `   - ${name}: Agent({ subagent_type: "pantheon:councillor-${name}", run_in_background: true, description: "Councillor on the task", prompt: <user task + fetched context> })`)

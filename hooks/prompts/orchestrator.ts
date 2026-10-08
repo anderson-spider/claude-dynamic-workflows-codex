@@ -1,3 +1,4 @@
+import { activeSeats } from '../roles'
 import type { PantheonConfig } from '../types'
 import { buildSuperpowersBlock } from './superpowers'
 
@@ -39,7 +40,7 @@ const PARALLEL_EXAMPLES = [
 export function buildOrchestratorSection(config: PantheonConfig): string {
   const active = (role: string) => !config.disabledAgents.includes(role)
   const agents = Object.entries(ROUTING).filter(([role]) => active(role)).map(([, block]) => block)
-  const seats = Object.keys(config.council.seats).sort()
+  const seats = activeSeats(config)
   const councilLine = active('council') && seats.length > 0
     ? [`Council seats: ${seats.map(name => config.council.seats[name]?.engine === 'codex' ? `delegate councillor:${name}` : `Agent pantheon:councillor-${name}`).join(', ')}; use Council Mode for consensus requests.`]
     : []

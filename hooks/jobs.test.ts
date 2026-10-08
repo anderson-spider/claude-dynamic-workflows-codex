@@ -320,6 +320,13 @@ describe('jobs', () => {
     }
   })
 
+  test('resumeTarget refuses a session already resumed by an active job', async () => {
+    const f = fixture([saved('done', 'thread-x')])
+    void f.jobs.run({ ...call, resumeSessionId: 'thread-x' }, { ...foreground, background: true })
+    await settle()
+    expect(f.jobs.resumeTarget('done')).toEqual({ error: expect.stringContaining('já está em uso') })
+  })
+
   test('cancel kills process and marks cancelled', async () => {
     const f = fixture()
     const pending = f.jobs.run(call, foreground)

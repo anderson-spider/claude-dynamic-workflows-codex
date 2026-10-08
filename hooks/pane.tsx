@@ -80,7 +80,10 @@ export type PaneData = {
 
 export function drawPane(el: PaneElements, data: PaneData) {
   const { Box, Text, Button } = el
-  const jobs = [...data.jobs].reverse().slice(0, Math.max(1, data.rows - 4))
+  // Ativos primeiro (um job travado nunca some do painel), depois os mais recentes.
+  const recent = [...data.jobs].reverse()
+  const jobs = [...recent.filter(job => ACTIVE.has(job.status)), ...recent.filter(job => !ACTIVE.has(job.status))]
+    .slice(0, Math.max(1, data.rows - 4))
   return (
     <Box flexDirection="column">
       {jobs.length === 0 && data.natives.length === 0 && <Text dimColor>Nenhum job do Pantheon nesta sessão.</Text>}

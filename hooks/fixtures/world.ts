@@ -17,6 +17,8 @@ export type World = {
   exitCode?: number
   /** O processo do Codex não termina até ser encerrado. */
   hang?: boolean
+  /** O primeiro agent.register falha. */
+  failFirstRegister?: boolean
   /** Agentes que $.agent.list devolve. */
   natives?: { id: string; type: string; status: 'running' | 'completed'; description: string }[]
   /** Respostas de process.run por comando (argv unido por espaço). */
@@ -54,7 +56,12 @@ export function world(on: On, opts: World = {}) {
   on('fs.stat', async (_$, e) => ({
     value: { kind: 'dir' as const, size: 0, mtimeMs: 0, isLink: false, realPath: opts.realPaths?.[e.path] ?? e.path },
   }))
-  on('agent.register', async (_$, e) => { seen.agents.push(e.name); return { value: { agent: `pantheon:${e.name}` } } })
+  let failRegister = opts.failFirstRegister === true
+  on('agent.register', async (_$, e) => {
+    if (failRegister) { failRegister = false; throw new Error('transient') }
+    seen.agents.push(e.name)
+    return { value: { agent: `pantheon:${e.name}` } }
+  })
   on('tool.register', async (_$, e) => { seen.tools.push(e.name); return { value: { tool: `mcp__pantheon__${e.name}` } } })
   on('ui.toast', async (_$, e) => { seen.toasts.push(e.text); return { value: undefined } })
   on('command.register', async (_$, e) => ({ value: { command: e.name } }))
