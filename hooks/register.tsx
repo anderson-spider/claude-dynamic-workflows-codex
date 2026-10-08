@@ -91,6 +91,7 @@ export const register: Register = on => {
   // Gravações do estado em fila, sempre com o snapshot mais recente: duas em voo
   // poderiam chegar fora de ordem e deixar no painel um status antigo.
   let pendingJobs: Job[] | undefined
+  let warnedWrite = false
   let flushing: Promise<void> | undefined
   function persist(list: Job[]) {
     pendingJobs = list
@@ -99,7 +100,11 @@ export const register: Register = on => {
         while (pendingJobs) {
           const next = pendingJobs
           pendingJobs = undefined
-          await live?.writeJobs(next).catch(() => {})
+          await live?.writeJobs(next).catch(error => {
+            if (warnedWrite) return
+            warnedWrite = true
+            live?.toast(`pantheon: não consegui gravar o estado dos jobs (o painel pode ficar desatualizado): ${error instanceof Error ? error.message : String(error)}`)
+          })
         }
       } finally {
         flushing = undefined
