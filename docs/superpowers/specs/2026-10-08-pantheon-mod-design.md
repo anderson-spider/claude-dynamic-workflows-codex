@@ -1,7 +1,7 @@
 # Pantheon: mod do Claude Code no estilo oh-my-opencode-slim
 
-Data: 2026-10-08 · Branch: `andersonsilva/pantheon-mod` · Revisão 2 (após revisão
-independente do spec)
+Data: 2026-10-08 · Branch: `andersonsilva/pantheon-mod` · Revisão 3 (após duas revisões
+independentes do spec)
 
 ## Objetivo
 
@@ -57,7 +57,7 @@ sem família→modelo).
 .claude-plugin/marketplace.json   o próprio repo como marketplace
 hooks/hooks.json                  { "modules": ["./register.tsx"] }
 hooks/register.tsx                liga eventos: session.start, tool.call, prompt.compose,
-                                  prompt.submit, command.run, ui.render
+                                  prompt.submit, agent.offer, command.run, ui.render
 hooks/config.ts                   padrões + ~/.claude/pantheon.json +
                                   <repo>/.claude/pantheon.json; validação; política de
                                   segurança
@@ -98,9 +98,15 @@ Dois grupos fixos. O grupo de um papel não muda por configuração.
 | `pantheon:councillor-<seat>` (seats `engine: "claude"`) | do seat | Read, Grep, Glob |
 
 `model` e `effort` dos nativos vão no registro do agente (o spawn não aceita `effort`);
-o Agent tool continua aceitando `model` por chamada. O teto de sandbox não se aplica aos
-nativos: o limite deles é a lista de ferramentas e o modo de permissão da sessão. O
-designer, único nativo que escreve, roda sob as permissões normais da sessão.
+o Agent tool continua aceitando `model` por chamada. O teto de sandbox e o `noNetwork`
+não se aplicam aos nativos: o limite deles é a lista de ferramentas e o modo de
+permissão da sessão. O designer, único nativo que escreve, roda sob as permissões
+normais da sessão.
+
+Um registro não pode ser desfeito durante a sessão. Por isso um hook `agent.offer` lê a
+config vigente e esconde do modelo todo `pantheon:*` que esteja em `disabledAgents`, que
+pertença a um seat removido ou com o council desligado. Agentes já em execução não são
+afetados.
 
 ## Configuração
 
@@ -121,7 +127,6 @@ Valores abaixo são os padrões; o arquivo só precisa do que muda.
     "designer":  { "model": "inherit" }
   },
   "council": {
-    "deadlineMinutes": 3,
     "seats": {
       "alpha": { "engine": "codex",  "model": "gpt-6-astra", "effort": "high" },
       "beta":  { "engine": "claude", "model": "opus" }
@@ -139,6 +144,8 @@ Merge:
   união.
 - Cada papel/seat aceita `model`, `effort` e `prompt` (acrescentado ao fim do prompt do
   papel, como o `customAppendPrompt` do slim). Papéis Codex aceitam `sandbox`.
+- `noNetwork` vale só para a rede dentro do sandbox do Codex
+  (`sandbox_workspace_write.network_access`); não restringe agentes nativos.
 - `danger-full-access` é recusado em qualquer campo.
 - `disabledAgents` aceita nomes de papel e `"council"` (desliga gatilho, seats e menção
   no system prompt).
@@ -164,8 +171,11 @@ Registradas com `$.tool.register`, `isDeferred: false`. Atendem só papéis Code
     papel > padrão do Codex). Permite o escalonamento de modelo que o SDD pede.
   - `cwd`: ver Workspace. Padrão: diretório da sessão.
   - `background: true`: devolve `{ jobId, status: "background" }` imediatamente.
-  - `resume`: `jobId` de um job Codex desta sessão já terminado. Reusa o `sessionId` e o
-    `cwd` gravados no job; o sandbox é recalculado com a política atual.
+  - `resume`: `jobId` de um job Codex desta sessão já terminado, `cancelled` ou `lost`.
+    Exige que o job tenha `sessionId` (gravado no `thread.started`); sem ele, erro
+    dizendo que o job morreu antes de o Codex abrir a sessão e que é preciso delegar de
+    novo. Reusa o `sessionId` e o `cwd` gravados; o sandbox é recalculado com a política
+    atual.
   - Retorno no foreground: mensagem final, `jobId`, uso (tokens, tempo).
   - Ao passar de `foregroundMinutes`: `{ jobId, status: "background" }`.
 - `delegate_result({ jobId })`: estado e, se terminado, resultado.
@@ -180,6 +190,10 @@ Registradas com `$.tool.register`, `isDeferred: false`. Atendem só papéis Code
   dentro da raiz (também resolvida). Fora disso → erro.
 - `resume` sempre usa o `cwd` gravado no job; não aceita `cwd` novo.
 - `--skip-git-repo-check` só é passado quando a raiz não é um repositório.
+- Toda execução passa `-c sandbox_workspace_write.writable_roots=[]`, no `exec` e no
+  `resume`, para que raízes graváveis extras herdadas do `config.toml` do usuário não
+  ampliem a escrita além do `cwd`. `/tmp` e `$TMPDIR` continuam graváveis (padrão do
+  Codex), porque testes e builds dependem deles.
 
 ## Fluxo de uma delegação
 
@@ -189,6 +203,7 @@ Registradas com `$.tool.register`, `isDeferred: false`. Atendem só papéis Code
 2. Cria job em `pantheon.jobs` (`running` ou `background`) e atualiza a status line.
 3. `$.process.spawn({ argv, cwd, input })`:
    - novo: `codex exec --json -s <sandbox> [-m <model>] [-c model_reasoning_effort=<e>]
+     -c sandbox_workspace_write.writable_roots=[]
      [-c sandbox_workspace_write.network_access=false] [--skip-git-repo-check] -`
    - resume: as mesmas opções de `exec` **antes** do subcomando, depois
      `resume <sessionId> -` (o subcomando `resume` não aceita `-s`).
@@ -206,7 +221,8 @@ Registradas com `$.tool.register`, `isDeferred: false`. Atendem só papéis Code
    ("job X do fixer terminou; use delegate_result").
 6. Esc no foreground: `next.signal` aborta, o loop sai e o processo morre.
 7. Reload do mod: o processo morre com o módulo; no `session.start` seguinte, jobs
-   `running` **e** `background` viram `lost` (retomáveis por `resume`).
+   `running` **e** `background` viram `lost`. São retomáveis por `resume` só os que já
+   têm `sessionId`; o painel mostra quais.
 
 Sem retry automático: repetir é decisão do orchestrator.
 
@@ -241,7 +257,9 @@ tarefa definir um formato de relatório, ele substitui o formato acima."
 
 ## Council
 
-- Gatilho (`prompt.submit`): só quando `e.origin.kind` indica o próprio usuário. Regex
+- Gatilho (`prompt.submit`): só quando `e.origin.kind` é `composer` (o usuário no
+  terminal) ou `bridge` (o usuário remoto); `sdk` e qualquer outra origem nunca
+  disparam. Regex
   do `council-inject` mais `conselho`, `consenso`, `segunda opinião`; ignora blocos e
   inline code; mensagem que começa com `/` não dispara. Avisos do Pantheon nunca
   disparam.
@@ -249,9 +267,12 @@ tarefa definir um formato de relatório, ele substitui o formato acima."
   primeiro e embutir resumo, porque conselheiros são read-only; (2) despachar todos os
   seats em background no mesmo turno: Codex com
   `delegate({ agent: "councillor:<seat>", background: true })`, Claude com o Agent tool
-  `pantheon:councillor-<seat>` e `run_in_background`; (3) coletar até
-  `deadlineMinutes`; uma nova tentativa para resposta vazia; seat sem resposta no prazo
-  vira "timed out", sem omitir; resposta tardia é ignorada; (4) sintetizar.
+  `pantheon:councillor-<seat>` e `run_in_background`; (3) coletar conforme cada seat
+  termina (cada conclusão acorda a sessão); uma nova tentativa para resposta vazia;
+  sintetizar quando todos tiverem terminado ou falhado; seat com falha aparece como tal,
+  sem omitir; um seat travado é visível no painel e pode ser cancelado com
+  `delegate_cancel` (Codex) ou parando o agente (nativo), e então conta como falha;
+  (4) sintetizar. Sem prazo fixo: o pior caso é a síntese atrasar, nunca se perder.
 - Síntese pelo próprio orchestrator, no formato de `council.ts`: `## Council Response`,
   `## Per-Councillor Details` (pelo nome do seat), `## Council Summary` (Consensus Level
   unanimous|majority|split, Agreed Points, Disagreements, Remaining Uncertainty,
@@ -269,7 +290,8 @@ retorno).
 | Despacho da skill | Pantheon |
 |---|---|
 | implementer (subagent-driven-development) | `delegate` com `fixer`; Agent `pantheon:designer` se a tarefa for UI |
-| spec reviewer e code reviewer (subagent-driven-development, requesting-code-review) | Agent `pantheon:oracle` |
+| task reviewer e re-reviewer do subagent-driven-development (um despacho por gate, com o pacote de `scripts/review-package`) | Agent `pantheon:oracle` |
+| code reviewer final da branch (subagent-driven-development, requesting-code-review) | Agent `pantheon:oracle`, despacho separado |
 | agentes em paralelo (dispatching-parallel-agents) | vários `delegate`/Agent na mesma mensagem, papel conforme a tarefa |
 
 Regras do bloco:
@@ -279,8 +301,9 @@ Regras do bloco:
   despachos.
 - O modelo escolhido pela skill vai em `model` do `delegate` ou do Agent tool.
 - O formato de relatório definido pela skill substitui o formato padrão do papel.
-- Revisões: o orchestrator gera o pacote de revisão (diff, SHAs, arquivos) num arquivo,
-  como o SDD já faz, e o reviewer lê esse arquivo, porque o oracle não tem Bash.
+- Revisões: o reviewer recebe o pacote de revisão em arquivo (no SDD, o gerado por
+  `scripts/review-package`; no requesting-code-review, um gerado pelo orchestrator com
+  diff e SHAs), porque o oracle não tem Bash.
 - O implementer Codex continua uma tarefa por `resume` (jobId); sem isso, segue o
   fallback da skill (novo implementer com brief, relatório e achados).
 - Papel desligado sai da tabela; a skill usa o Agent tool padrão naquele caso.
@@ -291,7 +314,8 @@ Regras do bloco:
   ativos.
 - `/pantheon`: abre painel (`$.ui.open` + `ui.render` `Pane`). Uma linha por item:
   - job Codex: estado (running, background, done, error, cancelled, lost), papel,
-    modelo, tempo, tokens, última atividade; botões Cancelar e Copiar resposta
+    modelo, tempo, tokens, última atividade, se é retomável; botões Cancelar e Copiar
+    resposta
     (`$.ui.copy`);
   - agente nativo `pantheon:*` (de `$.agent.list`): tipo, status, descrição; sem
     atividade nem botões.
@@ -310,25 +334,29 @@ rodando com `claude plugin test` (`claude-code/testing`):
 - `config.test.ts`: merge funcional; merge restritivo de `sandboxCap`/`noNetwork`
   (projeto não afrouxa usuário); `danger-full-access` recusado; config inválida bloqueia
   `delegate` e mantém a última política válida.
+- `offer.test.ts`: `pantheon:*` desligado, seat removido ou council desligado não é
+  oferecido; os demais são.
 - `roles.test.ts`: sandbox efetivo (porta dos casos de `runner/test/offline.js`),
   precedência chamada > papel > padrão para modelo e effort; nativo em `delegate` recusado
   com instrução; registros nativos refletem model/effort da config.
 - `workspace.test.ts`: `cwd` dentro e fora da raiz; symlink apontando para fora; resume
   ignora `cwd` novo.
 - `codex.test.ts`: argv por combinação (sandbox, modelo, effort, `noNetwork`,
-  `--skip-git-repo-check`), resume com opções antes do subcomando; parser sobre
+  `--skip-git-repo-check`), `writable_roots=[]` sempre presente, resume com opções antes
+  do subcomando; parser sobre
   `hooks/fixtures/codex-exec-sample.jsonl` e casos de erro.
 - `orchestrator.test.ts`: seção reflete papéis ativos; papel desligado some dos blocos e
   exemplos; mesma config → mesmos bytes; nenhuma menção a `task_revive`,
   `wait_for_user`, `question`, marketplace.
-- `council.test.ts`: gatilhos (EN, PT), code fences, inline code, slash command, origem
-  não-usuário não dispara; bloco lista todos os seats com a chamada certa por engine;
+- `council.test.ts`: gatilhos (EN, PT), code fences, inline code, slash command;
+  `composer` e `bridge` disparam, `sdk` e demais origens não; bloco lista todos os seats com a chamada certa por engine;
   formato de síntese presente.
-- `superpowers.test.ts`: bloco presente; exceção de executing-plans; linha de papel
-  desligado some.
+- `superpowers.test.ts`: bloco presente; exceção de executing-plans; um único task
+  reviewer por gate; linha de papel desligado some.
 - `jobs.test.ts`: termina no foreground; passa do limite → `background` e
   `prompt.submit` ao terminar; `background: true` volta na hora; `delegate_cancel` encerra
-  o processo; `session.start` marca `running` e `background` como `lost`.
+  o processo; `session.start` marca `running` e `background` como `lost`; `resume` de
+  job sem `sessionId` (reload antes do `thread.started`) dá erro claro.
 - `pane.test.ts`: `mount` em `['terminal', 'desktop']`, estados e botão Cancelar.
 - Validação manual em sessão real: explorer e fixer com Codex real; background forçado
   com `foregroundMinutes: 0.1`; council com um seat de cada engine; oracle nativo.
@@ -343,8 +371,6 @@ confirmar na implementação).
   parser trata tipos desconhecidos como atividade genérica.
 - Se o `claude plugin test` consegue mockar `$.process.spawn`; senão `codex.ts` e
   `jobs.ts` recebem um spawn injetável e os testes usam um fake.
-- Valores exatos de `e.origin.kind` para o próprio usuário (ler `PromptOrigin` nos
-  tipos).
 - Re-registro de agentes nativos durante a sessão vale a partir do turno seguinte.
 - O processamento de cada evento do Codex consome o orçamento do hook; o parser deve
   ser leve.
