@@ -213,6 +213,39 @@ disponíveis" no lugar de `context7`/`gh_grep`.
 - Prompt do seat (`prompt`) vai ao fim do prompt de conselheiro.
 - Sem gatilho, o custo é uma linha no system prompt citando os seats.
 
+## Integração com superpowers
+
+Skills do superpowers (subagent-driven-development, executing-plans,
+requesting-code-review, dispatching-parallel-agents, brainstorming, writing-plans) mandam
+despachar subagentes pelo Agent tool. Como `agent.offer` esconde os papéis do Pantheon do
+Agent nativo, sem orientação essas skills criariam subagentes Claude genéricos, fora do
+Codex, do painel e do teto de sandbox.
+
+A seção do orchestrator ganha um bloco curto e estático (sem detectar se o superpowers
+está instalado; sem a skill, o bloco nunca se aplica):
+
+> Quando uma skill pedir para despachar um subagente, use `delegate` no lugar do Agent
+> tool, mantendo o processo da skill (etapas, gates, formato de prompt e de retorno):
+
+| A skill pede | Pantheon |
+|---|---|
+| implementer (subagent-driven-development, executing-plans) | `fixer`; `designer` se a tarefa for UI |
+| spec reviewer / code reviewer (subagent-driven-development, requesting-code-review) | `oracle` |
+| pesquisa ou mapeamento (brainstorming, writing-plans) | `explorer` (código) e `librarian` (docs externas) |
+| agentes em paralelo (dispatching-parallel-agents) | vários `delegate` na mesma mensagem |
+
+Regras do bloco:
+
+- O prompt que a skill monta para o subagente vai inteiro como `prompt` do `delegate`; o
+  prompt do papel entra antes, como em qualquer delegação.
+- Um papel desligado em `disabledAgents` sai da tabela; a skill então usa o Agent tool
+  normalmente para aquele caso.
+- O bloco não altera gates nem aprovações das skills; só define onde cada subagente
+  roda.
+
+Teste em `orchestrator.test.ts`: o bloco está presente, reflete os papéis ativos e
+desaparece a linha de um papel desligado.
+
 ## Painel e comandos
 
 - Status line (`$.ui.status`): `pantheon: N rodando · M em background`; some sem jobs
