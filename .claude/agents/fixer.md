@@ -1,6 +1,6 @@
 ---
 name: fixer
-description: Codex role (run through codex-workflows with agentType "fixer"). Implements a scoped change from the plan it is given, runs the relevant tests and reports what it validated. Workspace-write.
+description: Codex role: do not invoke through the native Agent tool; run it via /codex-workflows with agentType "fixer". Implements a scoped change from the plan it is given, runs the relevant tests and reports what it validated. Workspace-write.
 harness: codex
 model: sonnet
 effort: high

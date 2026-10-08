@@ -1,6 +1,6 @@
 ---
 name: scout
-description: Codex role (run through codex-workflows with agentType "scout"). Finds and maps code; returns file:line locations and a short summary. Read-only; proposes no changes.
+description: Codex role: do not invoke through the native Agent tool; run it via /codex-workflows with agentType "scout". Finds and maps code; returns file:line locations and a short summary. Read-only; proposes no changes.
 harness: codex
 model: haiku
 effort: medium

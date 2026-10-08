@@ -1,6 +1,6 @@
 ---
 name: librarian
-description: Codex role (run through codex-workflows with agentType "librarian"). Researches documentation and APIs; cites source and version; separates fact from inference. Read-only.
+description: Codex role: do not invoke through the native Agent tool; run it via /codex-workflows with agentType "librarian". Researches documentation and APIs; cites source and version; separates fact from inference. Read-only.
 harness: codex
 model: haiku
 effort: medium
