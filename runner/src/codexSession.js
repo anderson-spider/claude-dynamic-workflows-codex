@@ -26,6 +26,7 @@ import {
 } from "./codexAgent.js";
 import { resolveModel, chooseModel } from "./modelMap.js";
 import { loadAgentType, claudeRoleError } from "./agentTypes.js";
+import { resolveSandbox } from "./roles.js";
 import { tokensForThread, markResumedThread } from "./meter.js";
 
 const DEFAULT_TURN_TIMEOUT_MS = 600_000; // the Codex per-turn cap (same as one-shot)
@@ -62,6 +63,8 @@ export async function startCodexSession(opts = {}) {
       log(`agentType '${opts.agentType}' not found — using default instructions`);
     }
   }
+  // `sandboxCap` (--sandbox for direct callers) bounds the sandbox, as in agent().
+  if (opts.sandboxCap != null) opts = { ...opts, sandbox: resolveSandbox({ cap: opts.sandboxCap, call: opts.sandbox }) };
   // Same model rule as agent(): --pin-model wins; --frontier yields to the role's model.
   const requestedModel = chooseModel({
     pinnedModel: opts.pinnedModel, frontierModel: opts.frontierModel,

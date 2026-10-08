@@ -87,10 +87,10 @@ rodam no frontier.
 
 **Sandbox.** Os papéis incluídos não definem `sandbox`: scout, librarian e fixer
 rodam com o sandbox do `agent()` ou do `--sandbox` (padrão `workspace-write`). Um
-`sandbox` no `roles.json` ou no frontmatter continua aceito, mas o `--sandbox`
-funciona como teto: vale o mais restritivo dos dois (`read-only` <
-`workspace-write` < `danger-full-access`). Um papel pode restringir o `--sandbox`,
-nunca ampliar. O `sandbox` passado no `agent()` vence os dois.
+`sandbox` no `roles.json` ou no frontmatter continua aceito. O `sandbox` passado no
+`agent()` vence o do papel, e o `--sandbox` funciona como teto para os dois: vale o
+mais restritivo (`read-only` < `workspace-write` < `danger-full-access`). Script e
+papel podem restringir o `--sandbox`, nunca ampliar.
 
 **Workflow mínimo** (uma chamada, para medir latência):
 
@@ -101,8 +101,8 @@ node runner/bin/summarize-run.js .workflow-journal/single-role.workflow.jsonl   
 ```
 
 > **Aviso.** As threads do Codex continuam com `approvalPolicy: "never"`: nenhum
-> comando pede aprovação. O sandbox (do `agent()`, do `--sandbox` ou de um
-> papel que o defina) é o único controle sobre o que o agente pode alterar.
+> comando pede aprovação. O sandbox (do `agent()` ou de um papel que o defina,
+> limitado pelo `--sandbox`) é o único controle sobre o que o agente pode alterar.
 
 ---
 

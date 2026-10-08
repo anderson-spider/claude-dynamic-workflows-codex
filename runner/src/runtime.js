@@ -13,7 +13,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { codexAgent } from "./codexAgent.js";
 import { startCodexSession } from "./codexSession.js";
 import { loadAgentType, claudeRoleError } from "./agentTypes.js";
-import { stricterSandbox } from "./roles.js";
+import { resolveSandbox } from "./roles.js";
 import { chooseModel } from "./modelMap.js";
 import { tokensSpent, outputSpent } from "./meter.js";
 import { identityHash } from "./journal.js";
@@ -195,13 +195,15 @@ export function createRuntime({
   }
 
   // Per-call options over role settings over runner defaults (--retries etc.).
-  // Sandbox: a per-call value wins; otherwise the stricter of the role's and
-  // --sandbox, so a role can narrow the CLI sandbox but never widen it. Effort
-  // goes through resolveEffort and the model through requestedModel, since both
-  // have their own pin/flag rules.
+  // Sandbox: the per-call value, else the role's, capped by --sandbox, so neither
+  // a script nor a role can widen the CLI sandbox. Effort goes through
+  // resolveEffort and the model through requestedModel, since both have their
+  // own pin/flag rules.
   function mergeOpts(opts, role) {
     const merged = { ...defaults, ...opts };
-    if (opts.sandbox == null && role?.sandbox) merged.sandbox = stricterSandbox(defaults.sandbox, role.sandbox);
+    const sandbox = resolveSandbox({ cap: defaults.sandbox, call: opts.sandbox, role: role?.sandbox });
+    if (sandbox == null) delete merged.sandbox;
+    else merged.sandbox = sandbox;
     return merged;
   }
   const requestedModel = (opts, role) =>
@@ -269,7 +271,7 @@ export function createRuntime({
     let metrics = null;
     const result = await pooled(() =>
       runAgent(prompt, {
-        ...merged, defaultModel, pinnedModel, frontierModel, log: onLog,
+        ...merged, sandboxCap: defaults.sandbox, defaultModel, pinnedModel, frontierModel, log: onLog,
         onMetrics: (m) => { metrics = m; },
         onProgress: onProgress ? (text) => onProgress(label, text, key) : undefined,
       }),
@@ -650,7 +652,7 @@ export function createRuntime({
 
     let driver;
     try {
-      driver = await startSession({ ...merged, defaultModel, pinnedModel, frontierModel, log: onLog, resumeThreadId: resumeThreadId ?? undefined });
+      driver = await startSession({ ...merged, sandboxCap: defaults.sandbox, defaultModel, pinnedModel, frontierModel, log: onLog, resumeThreadId: resumeThreadId ?? undefined });
     } catch (e) {
       release();
       throw e;

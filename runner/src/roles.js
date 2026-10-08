@@ -25,12 +25,17 @@ const SANDBOX_RANK = {
   "danger-full-access": 2, dangerFullAccess: 2,
 };
 
-// The more restrictive of two sandboxes; either may be unset. Used to cap a
-// role's sandbox by --sandbox, so a role file never widens the CLI choice.
+// The more restrictive of two sandboxes; either may be unset.
 export function stricterSandbox(a, b) {
   if (a == null) return b;
   if (b == null) return a;
   return (SANDBOX_RANK[b] ?? Infinity) < (SANDBOX_RANK[a] ?? Infinity) ? b : a;
+}
+
+// The sandbox an agent runs with: the per-call value, else the role's, capped
+// by `cap` (--sandbox). Neither a script nor a role file can widen the cap.
+export function resolveSandbox({ cap, call, role } = {}) {
+  return stricterSandbox(cap, call ?? role);
 }
 const TOP_LEVEL_FIELDS = new Set(["$schema", "roles"]);
 

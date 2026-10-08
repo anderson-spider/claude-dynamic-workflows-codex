@@ -13,6 +13,7 @@ import { AppServerClient } from "./appServerClient.js";
 import { recordTokenUsage, tokensForThread } from "./meter.js";
 import { resolveModel, modelId, chooseModel } from "./modelMap.js";
 import { loadAgentType, claudeRoleError } from "./agentTypes.js";
+import { resolveSandbox } from "./roles.js";
 
 // Normalize an authored JSON Schema for OpenAI strict structured outputs, which
 // require EVERY property to be listed in `required` and `additionalProperties:false`
@@ -182,6 +183,8 @@ export async function codexAgent(prompt, opts = {}) {
       log(`agentType '${opts.agentType}' not found — using default instructions`);
     }
   }
+  // `sandboxCap` (--sandbox for direct callers) bounds the sandbox, as in the runtime.
+  if (opts.sandboxCap != null) opts = { ...opts, sandbox: resolveSandbox({ cap: opts.sandboxCap, call: opts.sandbox }) };
   // `pinnedModel` (--pin-model) is authoritative: it overrides a per-call `model`,
   // an agentType model, and the CLI default. `frontierModel` (--frontier) overrides
   // a per-call `model` but yields to the agentType's model (see chooseModel).
