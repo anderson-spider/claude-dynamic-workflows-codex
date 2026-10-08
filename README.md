@@ -23,6 +23,79 @@ This repo is **two ways in**:
 
 ---
 
+## Time de papéis (fork)
+
+Um time no estilo oh-my-opencode-slim, com o Claude Code como orquestrador.
+
+**Quem roda onde**
+
+| Papel | Harness | Como chamar | Sandbox | Modelo inicial |
+|---|---|---|---|---|
+| `scout`: mapeia código, devolve `caminho:linha` | Codex | `agent(prompt, { agentType: "scout" })` | `read-only` | `gpt-6-luna` |
+| `librarian`: docs e APIs, com fonte e versão | Codex | `agent(prompt, { agentType: "librarian" })` | `read-only` | `gpt-6-luna` |
+| `fixer`: implementa o plano recebido e roda os testes | Codex | `agent(prompt, { agentType: "fixer" })` | `workspace-write` | `gpt-6.1-sol` |
+| `oracle`: arquitetura e code review, não edita | Claude | Agent tool nativo (`subagent_type: "oracle"`) | — | `opus` |
+| `designer`: UI e front-end | Claude | Agent tool nativo (`subagent_type: "designer"`) | — | `opus` |
+
+Os papéis ficam em [`.claude/agents/`](.claude/agents). O runner recusa
+`oracle` e `designer` como `agentType` (também em `--plan`), com um erro que
+manda chamá-los pelo Agent tool nativo. A recusa vem do campo `harness: claude`
+no frontmatter ou no `roles.json`.
+
+**Instalação.** O runner procura `.claude/agents/<papel>.md` subindo a partir do
+diretório do projeto e depois em `~/.claude/agents`. Ele não procura dentro do
+diretório do plugin, então instalar o plugin não basta: copie ou faça links dos
+papéis para `~/.claude/agents` (ou para o `.claude/agents` do projeto):
+
+```bash
+REPO=~/src/claude-dynamic-workflows-codex   # um clone deste fork
+mkdir -p ~/.claude/agents
+for r in scout librarian fixer oracle designer; do
+  ln -sf "$REPO/.claude/agents/$r.md" ~/.claude/agents/
+done
+```
+
+Como esses arquivos ficam no mesmo registro do Agent tool, o Claude Code também
+lista `scout`, `librarian` e `fixer` como subagentes nativos (com `haiku`/`sonnet`).
+Pelo runner, esses aliases viram `gpt-6-luna`/`gpt-6.1-sol` (veja `runner/src/modelMap.js`).
+
+**`roles.json` (opcional).** Sem ele, tudo funciona só com o frontmatter.
+
+- Usuário: `~/.config/codex-workflows/roles.json`
+- Projeto: `.codex-workflows/roles.json` (procurado subindo a partir do diretório
+  atual). O do projeto tem precedência, campo a campo.
+
+```bash
+mkdir -p ~/.config/codex-workflows
+cp "$REPO/examples/roles.example.json" ~/.config/codex-workflows/roles.json
+```
+
+Formato: `{ "roles": { "<papel>": { "harness", "model", "effort", "sandbox" } } }`.
+`harness` é `codex` ou `claude`; `sandbox` é `read-only` ou `workspace-write`
+(`danger-full-access` é recusado); `effort` é um dos níveis do Codex
+(`none`…`xhigh`). Campo desconhecido ou valor inválido interrompe a carga com o
+caminho do arquivo e o campo.
+
+**Precedência** (da maior para a menor): opções passadas no `agent()` >
+`roles.json` (projeto > usuário) > frontmatter do papel > padrões do runner
+(`--sandbox`, `--effort`, `--auto-effort`, `--model` e o padrão do Codex).
+`--pin-model`/`--frontier` e `--pin-effort` continuam acima de tudo. Agentes sem
+`agentType` mantêm o padrão global (`workspace-write`).
+
+**Workflow mínimo** (uma chamada, para medir latência):
+
+```bash
+node runner/bin/run-workflow.js examples/single-role.workflow.js \
+  --args '{"role":"scout","prompt":"Where is agentType resolved?"}'
+node runner/bin/summarize-run.js .workflow-journal/single-role.workflow.jsonl   # tempo e tokens
+```
+
+> **Aviso.** As threads do Codex continuam com `approvalPolicy: "never"`: nenhum
+> comando pede aprovação. O sandbox de cada papel é o único controle sobre o que
+> o agente pode alterar.
+
+---
+
 ## See it now (no Codex required)
 
 Want a look at a finished run before installing anything? The viewer is offline and self-contained, and the flagship demo is bundled:
