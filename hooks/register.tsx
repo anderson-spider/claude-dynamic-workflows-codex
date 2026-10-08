@@ -95,12 +95,15 @@ export const register: Register = on => {
   function persist(list: Job[]) {
     pendingJobs = list
     flushing ??= (async () => {
-      while (pendingJobs) {
-        const next = pendingJobs
-        pendingJobs = undefined
-        await live?.writeJobs(next).catch(() => {})
+      try {
+        while (pendingJobs) {
+          const next = pendingJobs
+          pendingJobs = undefined
+          await live?.writeJobs(next).catch(() => {})
+        }
+      } finally {
+        flushing = undefined
       }
-      flushing = undefined
     })()
   }
   const persisted = () => flushing ?? Promise.resolve()
@@ -128,7 +131,8 @@ export const register: Register = on => {
       notify: text => { void live?.submit(text).catch(() => {}) },
       initial: saved,
     })
-    await io.writeJobs(saved)
+    persist(saved)
+    await persisted()
     return jobs
   }
 
