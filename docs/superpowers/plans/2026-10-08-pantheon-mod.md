@@ -104,7 +104,31 @@ código definitivo.
 
 #### Resultado da Task 0
 
-(preencher)
+Executada em 2026-10-08 com Claude Code 2.1.295 e codex-cli 0.161/0.162.
+
+1. **Foreground longo: sim.** `spike_wait(360, 400)` respondeu `done` em 360013 ms dentro
+   do `tool.call`; o engine não abandonou a chamada.
+2. **Loop desacoplado + `prompt.submit`: sim.** `spike_wait(30, 10)` respondeu
+   `background` em 10 s; 30 s depois o aviso `spike: background terminou após 30 s`
+   chegou como um turno novo, com a sessão ociosa.
+3. **Hook `process.spawn` do teste substitui o real: sim.** O teste viu o argv
+   `['sleep', '7']` e o `thread_id` `t1` que só o fake produz.
+4. **`claude plugin test` dentro do sandbox do Codex: sim**, com
+   `codex sandbox -P :workspace -C <pasta> -- claude plugin test .` (1 pass).
+
+Decisão: frentes Codex no herdr, como planejado; nenhum fallback necessário.
+
+Regras do runtime descobertas (valem para todas as tasks):
+
+- O `result` de um `tool.call` de plugin precisa ser **string** (ou lista de blocos);
+  um objeto é recusado ("does not match its output shape"). `delegate`,
+  `delegate_result` e `delegate_cancel` devolvem texto.
+- Num teste, todo `$.clock` exige `mock.clock(on)`; sem ele, "no implementation for
+  clock.now".
+- Um hook geradora de `process.spawn` no teste encerra com
+  `return { value: { code, signal } }` (não `{ code, signal }`).
+- O argumento do `tool.call` chega achatado no `e` (`e.seconds`, não `e.input.seconds`).
+- O mod recarrega só no fim do turno que editou os arquivos.
 
 ---
 
