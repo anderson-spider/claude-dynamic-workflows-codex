@@ -1,9 +1,0 @@
-{
-  "roles": {
-    "scout": { "harness": "codex", "model": "gpt-6-luna", "effort": "medium" },
-    "librarian": { "harness": "codex", "model": "gpt-6-luna", "effort": "medium" },
-    "fixer": { "harness": "codex", "model": "gpt-6.1-sol", "effort": "high" },
-    "oracle": { "harness": "claude", "model": "opus" },
-    "designer": { "harness": "claude", "model": "opus" }
-  }
-}
