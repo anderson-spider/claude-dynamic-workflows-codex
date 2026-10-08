@@ -1,27 +1,30 @@
 # Pantheon: mod do Claude Code no estilo oh-my-opencode-slim
 
-Data: 2026-10-08 · Branch: `andersonsilva/pantheon-mod`
+Data: 2026-10-08 · Branch: `andersonsilva/pantheon-mod` · Revisão 2 (após revisão
+independente do spec)
 
 ## Objetivo
 
 Transformar este repositório num mod do Claude Code (plugin de function hooks) chamado
 `pantheon`, que reproduz o modelo do oh-my-opencode-slim: a sessão do Claude é o
-orchestrator e delega para especialistas, uns rodando no Codex (`codex exec`), outros como
-subagentes Claude. Sem CLI, sem DSL de workflow, sem viewers.
+orchestrator e delega para especialistas. Especialistas Codex rodam via `codex exec` pela
+ferramenta `delegate`; especialistas Claude são agentes nativos do plugin, chamados pelo
+Agent tool. Sem CLI, sem DSL de workflow, sem viewers.
 
 Critérios de sucesso:
 
 - Com o mod instalado, o Claude decide sozinho quando delegar, guiado por uma seção de
-  system prompt adaptada do `orchestrator.ts` do slim, e chama `mcp__pantheon__delegate`.
-- Delegações curtas voltam na própria chamada; longas viram job em background e acordam
-  a sessão ao terminar.
-- `/pantheon` mostra o progresso de todos os jobs da sessão.
-- Uma mensagem com gatilho de council (`council`, `consenso`...) dispara a consulta em
-  paralelo aos conselheiros e a síntese no formato do slim.
-- Teto de sandbox preservado: o mais restritivo vence, `danger-full-access` recusado.
+  system prompt adaptada do `orchestrator.ts` do slim.
+- Delegações Codex curtas voltam na própria chamada; longas (ou pedidas com
+  `background: true`) viram job em background e acordam a sessão ao terminar.
+- `/pantheon` mostra o progresso dos jobs Codex e dos agentes nativos `pantheon:*`.
+- Uma mensagem do usuário com gatilho de council dispara a consulta em paralelo aos
+  conselheiros e a síntese no formato do slim.
+- Teto de sandbox preservado e nunca afrouxado por configuração de projeto.
 
 Fora de escopo: fallback de modelo, Observer, limite de concorrência, persistência de jobs
-entre sessões, viewers HTML/ASCII, `--frontier`, steer de agente em execução.
+entre sessões, viewers HTML/ASCII, `--frontier`, steer de agente em execução, troca de um
+papel entre os grupos Codex e nativo.
 
 ## Referências
 
@@ -32,18 +35,20 @@ entre sessões, viewers HTML/ASCII, `--frontier`, steer de agente em execução.
   plugin-authoring.
 - Amostra real de `codex exec --json` (codex-cli 0.161.0):
   `docs/superpowers/fixtures/codex-exec-sample.jsonl`.
+- Skills do superpowers 6.4.2 (subagent-driven-development, requesting-code-review,
+  dispatching-parallel-agents, executing-plans).
 
 ## O que sai do repositório
 
 `runner/`, `bin/`, `examples/`, `references/`, `SKILL.md`, `scripts/sync-skill.js`,
-`docs/` (screenshots dos viewers; ficam só `docs/superpowers/`), `.claude/agents/`
+`docs/` (screenshots dos viewers; fica só `docs/superpowers/`), `.claude/agents/`
 (papéis migram para o mod), `package.json` atual (scripts do runner) e o conteúdo atual
 de `.claude-plugin/`. `README.md`, `CONTRIBUTING.md` e `.github/workflows/ci.yml` são
 reescritos.
 
 Do runner, só a lógica é portada (não o código): teto de sandbox (`roles.js`),
-carregamento e merge de papéis (`agentTypes.js`), precedência de modelo (`modelMap.js`,
-sem frontier e sem família→modelo).
+merge de papéis (`agentTypes.js`), precedência de modelo (`modelMap.js`, sem frontier e
+sem família→modelo).
 
 ## Estrutura
 
@@ -52,43 +57,55 @@ sem frontier e sem família→modelo).
 .claude-plugin/marketplace.json   o próprio repo como marketplace
 hooks/hooks.json                  { "modules": ["./register.tsx"] }
 hooks/register.tsx                liga eventos: session.start, tool.call, prompt.compose,
-                                  prompt.submit, agent.offer, turn.complete, command.run,
-                                  ui.render
-hooks/config.ts                   padrões embutidos + ~/.claude/pantheon.json +
-                                  <repo>/.claude/pantheon.json; validação
-hooks/roles.ts                    definição dos papéis, teto de sandbox, resolução de modelo
+                                  prompt.submit, command.run, ui.render
+hooks/config.ts                   padrões + ~/.claude/pantheon.json +
+                                  <repo>/.claude/pantheon.json; validação; política de
+                                  segurança
+hooks/roles.ts                    papéis Codex e nativos; resolução de sandbox/modelo/effort
+hooks/workspace.ts                raiz autorizada e validação de cwd
 hooks/prompts/orchestrator.ts     seção de system prompt (função pura da config)
 hooks/prompts/roles.ts            prompts de cada papel (de role-prompts.ts)
-hooks/prompts/council.ts          gatilho + bloco Council Mode (de council-inject)
+hooks/prompts/council.ts          gatilho + bloco Council Mode
+hooks/prompts/superpowers.ts      bloco de integração com superpowers
 hooks/codex.ts                    argv do codex exec; parser de JSONL → eventos de job
-hooks/claude.ts                   spawn de papel Claude via $.agent.spawn
-hooks/jobs.ts                     estado dos jobs, foreground→background, cancelamento
+hooks/jobs.ts                     estado dos jobs Codex, foreground→background, cancelamento
 hooks/pane.tsx                    painel /pantheon e linha de status
 types/index.d.ts                  contrato do $.state (pantheon.jobs)
+hooks/fixtures/                   amostras JSONL do codex exec
 hooks/*.test.ts                   testes (claude plugin test)
 ```
 
 ## Papéis
 
-| Papel | Motor padrão | Modelo padrão | Sandbox / ferramentas |
-|---|---|---|---|
-| orchestrator | sessão principal | o da sessão | — |
-| explorer | codex | `gpt-6-luna` | `read-only` |
-| librarian | codex | `gpt-6-luna` | `read-only` (rede conforme config) |
-| fixer | codex | `gpt-6-luna` | `workspace-write` |
-| oracle | claude | `opus` | Read, Grep, Glob |
-| designer | claude | herda | todas |
-| councillor:\<seat\> | por seat | por seat | codex `read-only` / claude Read, Grep, Glob |
+Dois grupos fixos. O grupo de um papel não muda por configuração.
 
-Todo papel tem `engine: "codex" | "claude"` trocável na config. Para papéis Claude,
-`sandbox` não se aplica; vale a lista de ferramentas do agente.
+**Codex** (via `delegate`):
+
+| Papel | Modelo padrão | Sandbox padrão |
+|---|---|---|
+| explorer | `gpt-6-luna` | `read-only` |
+| librarian | `gpt-6-luna` | `read-only` |
+| fixer | `gpt-6-luna` | `workspace-write` |
+| councillor:\<seat\> (seats `engine: "codex"`) | do seat | `read-only` (fixo) |
+
+**Nativos Claude** (via Agent tool, registrados com `$.agent.register` no
+`session.start` e re-registrados quando a config muda):
+
+| Agente | Modelo padrão | Ferramentas |
+|---|---|---|
+| `pantheon:oracle` | `opus` | Read, Grep, Glob |
+| `pantheon:designer` | `inherit` | todas |
+| `pantheon:councillor-<seat>` (seats `engine: "claude"`) | do seat | Read, Grep, Glob |
+
+`model` e `effort` dos nativos vão no registro do agente (o spawn não aceita `effort`);
+o Agent tool continua aceitando `model` por chamada. O teto de sandbox não se aplica aos
+nativos: o limite deles é a lista de ferramentas e o modo de permissão da sessão. O
+designer, único nativo que escreve, roda sob as permissões normais da sessão.
 
 ## Configuração
 
-Arquivo `~/.claude/pantheon.json`, sobrescrito campo a campo por
-`<repo>/.claude/pantheon.json`. Lido via `$.fs` a cada `delegate` (mudanças valem sem
-reload) e no `session.start` / a cada turno para montar o system prompt. Os valores abaixo
-são os padrões embutidos; o arquivo só precisa do que muda.
+Arquivo `~/.claude/pantheon.json`, sobrescrito por `<repo>/.claude/pantheon.json`.
+Valores abaixo são os padrões; o arquivo só precisa do que muda.
 
 ```json
 {
@@ -97,13 +114,14 @@ são os padrões embutidos; o arquivo só precisa do que muda.
   "foregroundMinutes": 5,
   "disabledAgents": [],
   "agents": {
-    "explorer":  { "engine": "codex",  "model": "gpt-6-luna", "sandbox": "read-only" },
-    "librarian": { "engine": "codex",  "model": "gpt-6-luna", "sandbox": "read-only" },
-    "fixer":     { "engine": "codex",  "model": "gpt-6-luna", "sandbox": "workspace-write" },
-    "oracle":    { "engine": "claude", "model": "opus" },
-    "designer":  { "engine": "claude" }
+    "explorer":  { "model": "gpt-6-luna", "sandbox": "read-only" },
+    "librarian": { "model": "gpt-6-luna", "sandbox": "read-only" },
+    "fixer":     { "model": "gpt-6-luna", "sandbox": "workspace-write" },
+    "oracle":    { "model": "opus" },
+    "designer":  { "model": "inherit" }
   },
   "council": {
+    "deadlineMinutes": 3,
     "seats": {
       "alpha": { "engine": "codex",  "model": "gpt-6-astra", "effort": "high" },
       "beta":  { "engine": "claude", "model": "opus" }
@@ -112,186 +130,221 @@ são os padrões embutidos; o arquivo só precisa do que muda.
 }
 ```
 
-- Cada papel/seat aceita `model`, `effort` (Codex: `-c model_reasoning_effort=…`) e
-  `prompt` (acrescentado ao fim do prompt do papel, como o `customAppendPrompt` do slim).
+Merge:
+
+- **Campos de segurança** (`sandboxCap`, `noNetwork`) combinam pelo mais restritivo
+  entre padrão, usuário e projeto: `read-only` < `workspace-write`; `noNetwork: true`
+  vence. Um projeto nunca afrouxa o usuário.
+- **Demais campos**: projeto sobrescreve usuário campo a campo; `disabledAgents` é a
+  união.
+- Cada papel/seat aceita `model`, `effort` e `prompt` (acrescentado ao fim do prompt do
+  papel, como o `customAppendPrompt` do slim). Papéis Codex aceitam `sandbox`.
+- `danger-full-access` é recusado em qualquer campo.
 - `disabledAgents` aceita nomes de papel e `"council"` (desliga gatilho, seats e menção
   no system prompt).
-- Sandbox efetivo = o mais restritivo entre o do papel e `sandboxCap`
-  (`read-only` < `workspace-write`). `danger-full-access` é recusado em qualquer lugar.
-- `noNetwork: true` passa `-c sandbox_workspace_write.network_access=false`.
-- Config inválida: toast com o erro, mod segue com os padrões.
 
-## Ferramentas (`$.tool.register`, `isDeferred: false`)
+Config inválida (JSON ruim, campo desconhecido, valor fora do domínio): toast com o
+erro; **`delegate` recusa toda delegação** com a mensagem de erro até a config ser
+corrigida; os nativos não são re-registrados (ficam os da última config válida, ou os
+padrões se nunca houve uma). Nunca se cai num padrão mais permissivo do que a última
+política válida.
 
-- `delegate({ agent, prompt, description?, cwd?, resume? })`
-  - `agent`: papel ativo ou `councillor:<seat>`. Nome desconhecido ou desligado → erro
-    com a lista válida.
-  - `resume`: `sessionId` de uma delegação anterior do mesmo papel (Codex: thread id;
-    Claude: não suportado na v1, retorna erro explicativo).
-  - Retorno no foreground: mensagem final, `sessionId`, `jobId`, uso (tokens, tempo).
-  - Retorno ao passar de `foregroundMinutes`: `{ jobId, status: "background" }`.
-- `delegate_result({ jobId })`: estado e, se terminado, resultado do job.
-- `delegate_cancel({ jobId })`: encerra o job (mata o processo Codex ou ignora o
-  resultado do subagente Claude) e marca `cancelled`. Mudanças parciais ficam no disco.
+Leitura: no `session.start`, a cada `delegate` e a cada `prompt.compose` (via `$.fs`;
+mudanças valem sem reload).
+
+## Ferramenta `delegate` e companheiras
+
+Registradas com `$.tool.register`, `isDeferred: false`. Atendem só papéis Codex.
+
+- `delegate({ agent, prompt, description?, cwd?, model?, effort?, background?, resume? })`
+  - `agent`: `explorer`, `librarian`, `fixer` ou `councillor:<seat>` de seat Codex.
+    Nativo, desconhecido ou desligado → erro dizendo o que usar (o agente nativo pelo
+    Agent tool, ou a lista válida).
+  - `model` / `effort`: sobrescrevem os do papel nesta chamada (precedência: chamada >
+    papel > padrão do Codex). Permite o escalonamento de modelo que o SDD pede.
+  - `cwd`: ver Workspace. Padrão: diretório da sessão.
+  - `background: true`: devolve `{ jobId, status: "background" }` imediatamente.
+  - `resume`: `jobId` de um job Codex desta sessão já terminado. Reusa o `sessionId` e o
+    `cwd` gravados no job; o sandbox é recalculado com a política atual.
+  - Retorno no foreground: mensagem final, `jobId`, uso (tokens, tempo).
+  - Ao passar de `foregroundMinutes`: `{ jobId, status: "background" }`.
+- `delegate_result({ jobId })`: estado e, se terminado, resultado.
+- `delegate_cancel({ jobId })`: encerra o processo Codex e marca `cancelled`. Mudanças
+  parciais ficam no disco; o retorno lista isso.
+
+## Workspace
+
+- Raiz autorizada: `git rev-parse --show-toplevel` do diretório da sessão; fora de um
+  repositório, o próprio diretório da sessão.
+- `cwd` é resolvido com `$.fs.stat(path, { resolve: true })` e precisa ter `realPath`
+  dentro da raiz (também resolvida). Fora disso → erro.
+- `resume` sempre usa o `cwd` gravado no job; não aceita `cwd` novo.
+- `--skip-git-repo-check` só é passado quando a raiz não é um repositório.
 
 ## Fluxo de uma delegação
 
-1. Resolve papel → config efetiva (motor, modelo, effort, sandbox, prompt).
-2. Cria job em `pantheon.jobs` (`running`) e atualiza status line.
-3. **Codex**: `$.process.spawn({ argv, cwd, input })` com
-   `codex exec --json --skip-git-repo-check -s <sandbox> [-m <model>] [-c …] -`
-   (ou `codex exec resume <sessionId> --json … -`). `input` = prompt do papel + prompt da
-   tarefa. Eventos da amostra real:
-   - `thread.started.thread_id` → `sessionId`
-   - `item.started` / `item.completed` com `command_execution` (`command`, `exit_code`),
-     `agent_message` (`text`), demais tipos de item → última atividade do job
+1. Valida config, papel e `cwd`; resolve modelo, effort, sandbox efetivo
+   (mais restritivo entre papel, chamada não pode ampliar, e `sandboxCap`) e prompt
+   (prompt do papel + `prompt` da config + prompt da tarefa).
+2. Cria job em `pantheon.jobs` (`running` ou `background`) e atualiza a status line.
+3. `$.process.spawn({ argv, cwd, input })`:
+   - novo: `codex exec --json -s <sandbox> [-m <model>] [-c model_reasoning_effort=<e>]
+     [-c sandbox_workspace_write.network_access=false] [--skip-git-repo-check] -`
+   - resume: as mesmas opções de `exec` **antes** do subcomando, depois
+     `resume <sessionId> -` (o subcomando `resume` não aceita `-s`).
+4. Eventos (amostra real):
+   - `thread.started.thread_id` → `sessionId` do job
+   - `item.started` / `item.completed`: `command_execution` (`command`, `exit_code`),
+     `agent_message` (`text`), demais tipos → última atividade
    - última `agent_message` → resposta final
    - `turn.completed.usage` → tokens
-   - saída ≠ 0, `turn.failed`/`error`, ou sem `agent_message` → erro com as últimas
+   - saída ≠ 0, `turn.failed`/`error`, ou sem `agent_message` → `error`, com as últimas
      linhas de stderr
-4. **Claude**: `$.agent.spawn({ subagentType: "pantheon:<papel>", prompt, description,
-   model })`; resposta pelo `turn.complete` com o mesmo `agentId`.
-5. Foreground: a chamada aguarda até `foregroundMinutes`. Termina antes → retorna.
-   Passou → retorna `background`; o loop continua desacoplado da chamada e, ao terminar,
-   `$.prompt.submit` avisa a sessão ("job X do explorer terminou; use delegate_result").
-6. Esc durante foreground: `next.signal` aborta, o loop sai e o processo morre.
-7. Reload do mod: jobs em execução morrem com o módulo; o `$.state` mantém a lista, e
-   no `session.start` seguinte jobs `running` viram `lost` (retomáveis por `resume`).
+5. Foreground: aguarda até `foregroundMinutes` (a espera em `$.process.spawn` não consome
+   o orçamento de 10 s do hook). Terminou → retorna. Passou → retorna `background`; o
+   loop continua desacoplado da chamada e, ao terminar, `$.prompt.submit` avisa a sessão
+   ("job X do fixer terminou; use delegate_result").
+6. Esc no foreground: `next.signal` aborta, o loop sai e o processo morre.
+7. Reload do mod: o processo morre com o módulo; no `session.start` seguinte, jobs
+   `running` **e** `background` viram `lost` (retomáveis por `resume`).
 
 Sem retry automático: repetir é decisão do orchestrator.
 
-## Papéis Claude
-
-`oracle`, `designer` e um tipo `councillor` genérico registrados com `$.agent.register`
-no `session.start` (`pantheon:oracle`, `pantheon:designer`, `pantheon:councillor`), com
-prompt de `hooks/prompts/roles.ts`. Seats Claude do council usam `pantheon:councillor`
-com `model` do seat no spawn. Um hook `agent.offer` esconde esses tipos do Agent tool
-nativo, para que toda delegação passe por `delegate` e apareça no painel.
-
 ## System prompt do orchestrator (`prompt.compose`)
 
-Seção de sessão adicionada por último, função pura da config efetiva (bytes estáveis
-enquanto a config não muda, para o prompt cache). Adaptada de `orchestrator.ts`:
+Seção de sessão adicionada por último, função pura da config efetiva (mesmos bytes para
+a mesma config, por causa do prompt cache). Adaptada de `orchestrator.ts`:
 
 - **Mantido**: `<Role>` (gerente de workflow; faz direto só ação isolada, clara e de
   baixo risco); `<Agents>` com os blocos de `role-routing.ts` filtrados pelos papéis
-  ativos, sem as linhas "Permissions"/"Stats"; Workflow 1–5 (Understand, Path
-  Selection, Delegation Check com routing threshold e dispatch efficiency, Plan and
-  Parallelize sem sobrepor escopos de escrita, Verify); Design Handoff Discipline;
-  exemplos de delegação em paralelo filtrados por papel ativo.
-- **Adaptado**: Background Task Discipline, Active Task Amendments e Session Reuse
-  reescritos para `delegate` / `delegate_result` / `delegate_cancel` / `resume`.
-  "Lance em background, dê um status curto e encerre o turno" vale para jobs em
-  background, com o aviso automático via `$.prompt.submit`. Sem `task_message`/steer.
-  Regras de arquivo reescritas para as ferramentas reais.
+  ativos, sem "Permissions"/"Stats", cada um dizendo como chamar (`delegate` para Codex,
+  Agent tool com `pantheon:<nome>` para nativos); Workflow 1–5; Design Handoff
+  Discipline; exemplos de paralelo filtrados por papel ativo.
+- **Adaptado**: Background Task Discipline, Active Task Amendments e Session Reuse para
+  `delegate` / `delegate_result` / `delegate_cancel` / `resume` e para o
+  `run_in_background` do Agent tool. "Lance em background, dê um status curto e encerre
+  o turno" vale para os dois. Sem `task_message`/steer. Regras de arquivo reescritas
+  para as ferramentas reais.
 - **Removido**: Todo Continuity, Marketplace, `wait_for_user`, `question`,
   `<Communication>` (coberto pelo output style e pelo CLAUDE.md do usuário).
 
-Tamanho alvo: ~90 linhas.
+Tamanho alvo: ~100 linhas, incluindo o bloco de superpowers.
 
 ## Prompts dos papéis
 
-De `role-prompts.ts`, quase literais, incluindo formatos de saída (`<results>` do
-explorer; `<summary>/<changes>/<verification>` do fixer). Regras de arquivo por motor:
-Codex (`rg`, shell para diagnóstico, `apply_patch` para edição; read-only proíbe
-escrita); Claude (Read/Grep/Glob/Edit). Librarian: "busca na web e MCPs de documentação
-disponíveis" no lugar de `context7`/`gh_grep`.
+De `role-prompts.ts`, quase literais, com formatos de saída (`<results>` do explorer;
+`<summary>/<changes>/<verification>` do fixer). Regras de arquivo por grupo: Codex
+(`rg`, shell para diagnóstico, `apply_patch` para edição; read-only proíbe escrita);
+nativos (Read/Grep/Glob/Edit). Librarian: "busca na web e MCPs de documentação
+disponíveis" no lugar de `context7`/`gh_grep`. Todo prompt de papel termina com: "Se a
+tarefa definir um formato de relatório, ele substitui o formato acima."
 
 ## Council
 
-- Gatilho (`prompt.submit`): regex do `council-inject` mais `conselho`, `consenso`,
-  `segunda opinião`; ignora blocos e inline code; mensagens que começam com `/` não
+- Gatilho (`prompt.submit`): só quando `e.origin.kind` indica o próprio usuário. Regex
+  do `council-inject` mais `conselho`, `consenso`, `segunda opinião`; ignora blocos e
+  inline code; mensagem que começa com `/` não dispara. Avisos do Pantheon nunca
   disparam.
 - Com gatilho, anexa ao prompt o bloco Council Mode: (1) buscar contexto externo
-  primeiro e embutir resumo, porque conselheiros são read-only; (2) `delegate` em
-  paralelo, um por seat (`councillor:<seat>`); (3) uma nova tentativa para resposta
-  vazia, seguir sem o seat após 3 minutos, marcar falhas sem omitir; (4) sintetizar.
-- Síntese pelo próprio orchestrator, no formato obrigatório de `council.ts`:
-  `## Council Response`, `## Per-Councillor Details` (pelo nome do seat),
-  `## Council Summary` (Consensus Level unanimous|majority|split, Agreed Points,
-  Disagreements, Remaining Uncertainty, Recommended Action).
-- Prompt do seat (`prompt`) vai ao fim do prompt de conselheiro.
+  primeiro e embutir resumo, porque conselheiros são read-only; (2) despachar todos os
+  seats em background no mesmo turno: Codex com
+  `delegate({ agent: "councillor:<seat>", background: true })`, Claude com o Agent tool
+  `pantheon:councillor-<seat>` e `run_in_background`; (3) coletar até
+  `deadlineMinutes`; uma nova tentativa para resposta vazia; seat sem resposta no prazo
+  vira "timed out", sem omitir; resposta tardia é ignorada; (4) sintetizar.
+- Síntese pelo próprio orchestrator, no formato de `council.ts`: `## Council Response`,
+  `## Per-Councillor Details` (pelo nome do seat), `## Council Summary` (Consensus Level
+  unanimous|majority|split, Agreed Points, Disagreements, Remaining Uncertainty,
+  Recommended Action).
 - Sem gatilho, o custo é uma linha no system prompt citando os seats.
 
 ## Integração com superpowers
 
-Skills do superpowers (subagent-driven-development, executing-plans,
-requesting-code-review, dispatching-parallel-agents, brainstorming, writing-plans) mandam
-despachar subagentes pelo Agent tool. Como `agent.offer` esconde os papéis do Pantheon do
-Agent nativo, sem orientação essas skills criariam subagentes Claude genéricos, fora do
-Codex, do painel e do teto de sandbox.
+As skills que despacham subagentes os criariam pelo Agent tool com tipos genéricos, fora
+dos papéis do Pantheon. A seção do orchestrator ganha um bloco estático (sem gatilho,
+nunca se aplica): quando uma skill mandar despachar um subagente, use o papel abaixo,
+mantendo o processo da skill (etapas, gates, escolha de modelo, formato de prompt e de
+retorno).
 
-A seção do orchestrator ganha um bloco curto e estático (sem detectar se o superpowers
-está instalado; sem a skill, o bloco nunca se aplica):
-
-> Quando uma skill pedir para despachar um subagente, use `delegate` no lugar do Agent
-> tool, mantendo o processo da skill (etapas, gates, formato de prompt e de retorno):
-
-| A skill pede | Pantheon |
+| Despacho da skill | Pantheon |
 |---|---|
-| implementer (subagent-driven-development, executing-plans) | `fixer`; `designer` se a tarefa for UI |
-| spec reviewer / code reviewer (subagent-driven-development, requesting-code-review) | `oracle` |
-| pesquisa ou mapeamento (brainstorming, writing-plans) | `explorer` (código) e `librarian` (docs externas) |
-| agentes em paralelo (dispatching-parallel-agents) | vários `delegate` na mesma mensagem |
+| implementer (subagent-driven-development) | `delegate` com `fixer`; Agent `pantheon:designer` se a tarefa for UI |
+| spec reviewer e code reviewer (subagent-driven-development, requesting-code-review) | Agent `pantheon:oracle` |
+| agentes em paralelo (dispatching-parallel-agents) | vários `delegate`/Agent na mesma mensagem, papel conforme a tarefa |
 
 Regras do bloco:
 
-- O prompt que a skill monta para o subagente vai inteiro como `prompt` do `delegate`; o
-  prompt do papel entra antes, como em qualquer delegação.
-- Um papel desligado em `disabledAgents` sai da tabela; a skill então usa o Agent tool
-  normalmente para aquele caso.
-- O bloco não altera gates nem aprovações das skills; só define onde cada subagente
-  roda.
-
-Teste em `orchestrator.test.ts`: o bloco está presente, reflete os papéis ativos e
-desaparece a linha de um papel desligado.
+- **executing-plans** roda no próprio agente principal: o bloco declara que essa
+  modalidade é uma exceção à regra geral de delegar e não deve ser convertida em
+  despachos.
+- O modelo escolhido pela skill vai em `model` do `delegate` ou do Agent tool.
+- O formato de relatório definido pela skill substitui o formato padrão do papel.
+- Revisões: o orchestrator gera o pacote de revisão (diff, SHAs, arquivos) num arquivo,
+  como o SDD já faz, e o reviewer lê esse arquivo, porque o oracle não tem Bash.
+- O implementer Codex continua uma tarefa por `resume` (jobId); sem isso, segue o
+  fallback da skill (novo implementer com brief, relatório e achados).
+- Papel desligado sai da tabela; a skill usa o Agent tool padrão naquele caso.
 
 ## Painel e comandos
 
 - Status line (`$.ui.status`): `pantheon: N rodando · M em background`; some sem jobs
   ativos.
-- `/pantheon`: abre painel (`$.ui.open` + `ui.render` `Pane`). Uma linha por job:
-  estado (running, done, error, background, cancelled, lost), papel, motor/modelo, tempo,
-  tokens, última atividade (só Codex). Botões Cancelar (ativos) e Copiar resposta
-  (`$.ui.copy`, concluídos). Não abre sozinho.
-- `/pantheon cancel <jobId>`, `/pantheon config` (config efetiva e origem de cada campo),
-  `/pantheon doctor` (`codex` no PATH, versão, `codex login status`, config válida).
+- `/pantheon`: abre painel (`$.ui.open` + `ui.render` `Pane`). Uma linha por item:
+  - job Codex: estado (running, background, done, error, cancelled, lost), papel,
+    modelo, tempo, tokens, última atividade; botões Cancelar e Copiar resposta
+    (`$.ui.copy`);
+  - agente nativo `pantheon:*` (de `$.agent.list`): tipo, status, descrição; sem
+    atividade nem botões.
+  Não abre sozinho.
+- `/pantheon cancel <jobId>`, `/pantheon config` (config efetiva, origem de cada campo e
+  erro atual, se houver), `/pantheon doctor` (`codex` no PATH, versão,
+  `codex login status`, config válida, raiz autorizada).
 - Estado em `$.state` (`pantheon.jobs`), declarado em `types/index.d.ts`.
 
 ## Testes
 
-Seguindo o padrão do slim (funções puras testadas por `toContain`/`not.toContain`,
-determinismo verificado por igualdade de duas chamadas, regex de gatilho com casos
-positivos e negativos), rodando com `claude plugin test` (`claude-code/testing`):
+Padrão do slim (funções puras testadas com `toContain`/`not.toContain`, determinismo
+por igualdade de duas chamadas, regex de gatilho com casos positivos e negativos),
+rodando com `claude plugin test` (`claude-code/testing`):
 
-- `config.test.ts`: merge padrão → usuário → projeto; config inválida cai nos padrões;
-  `disabledAgents`.
-- `roles.test.ts`: teto de sandbox (porta dos casos de `runner/test/offline.js`),
-  recusa de `danger-full-access`, resolução de modelo/effort.
-- `codex.test.ts`: argv por combinação (sandbox, modelo, effort, `noNetwork`, `resume`);
-  parser sobre `docs/superpowers/fixtures/codex-exec-sample.jsonl` e casos de erro.
+- `config.test.ts`: merge funcional; merge restritivo de `sandboxCap`/`noNetwork`
+  (projeto não afrouxa usuário); `danger-full-access` recusado; config inválida bloqueia
+  `delegate` e mantém a última política válida.
+- `roles.test.ts`: sandbox efetivo (porta dos casos de `runner/test/offline.js`),
+  precedência chamada > papel > padrão para modelo e effort; nativo em `delegate` recusado
+  com instrução; registros nativos refletem model/effort da config.
+- `workspace.test.ts`: `cwd` dentro e fora da raiz; symlink apontando para fora; resume
+  ignora `cwd` novo.
+- `codex.test.ts`: argv por combinação (sandbox, modelo, effort, `noNetwork`,
+  `--skip-git-repo-check`), resume com opções antes do subcomando; parser sobre
+  `hooks/fixtures/codex-exec-sample.jsonl` e casos de erro.
 - `orchestrator.test.ts`: seção reflete papéis ativos; papel desligado some dos blocos e
-  dos exemplos de paralelo; mesma config → mesmos bytes; nenhuma menção a `task_revive`,
+  exemplos; mesma config → mesmos bytes; nenhuma menção a `task_revive`,
   `wait_for_user`, `question`, marketplace.
-- `council.test.ts`: gatilhos (EN, PT), code fences, inline code, slash command; bloco
-  lista todos os seats; formato de síntese presente.
+- `council.test.ts`: gatilhos (EN, PT), code fences, inline code, slash command, origem
+  não-usuário não dispara; bloco lista todos os seats com a chamada certa por engine;
+  formato de síntese presente.
+- `superpowers.test.ts`: bloco presente; exceção de executing-plans; linha de papel
+  desligado some.
 - `jobs.test.ts`: termina no foreground; passa do limite → `background` e
-  `prompt.submit` ao terminar; `delegate_cancel` encerra o processo; `session.start`
-  marca `running` como `lost`. `$.process.spawn` e relógio mockados.
+  `prompt.submit` ao terminar; `background: true` volta na hora; `delegate_cancel` encerra
+  o processo; `session.start` marca `running` e `background` como `lost`.
 - `pane.test.ts`: `mount` em `['terminal', 'desktop']`, estados e botão Cancelar.
-- Validação manual em sessão real: explorer e fixer com Codex real, background forçado
-  com `foregroundMinutes: 0.1`, council com dois seats.
+- Validação manual em sessão real: explorer e fixer com Codex real; background forçado
+  com `foregroundMinutes: 0.1`; council com um seat de cada engine; oracle nativo.
 
 CI: `tsc -p .` e `claude plugin validate .`; `claude plugin test .` se o `claude` rodar
-sem login no runner do GitHub, senão fica como passo local obrigatório no CONTRIBUTING
-(a confirmar na implementação).
+sem login no runner do GitHub, senão passo local obrigatório no CONTRIBUTING (a
+confirmar na implementação).
 
 ## Riscos e pontos a confirmar na implementação
 
-- Formato completo dos eventos do `codex exec --json` além da amostra (itens de
-  `file_change`, `turn.failed`): o parser trata tipos desconhecidos como atividade
-  genérica.
+- Eventos do `codex exec --json` além da amostra (`file_change`, `turn.failed`): o
+  parser trata tipos desconhecidos como atividade genérica.
 - Se o `claude plugin test` consegue mockar `$.process.spawn`; senão `codex.ts` e
   `jobs.ts` recebem um spawn injetável e os testes usam um fake.
-- Tempo do hook: a espera em `$.process.spawn`/`$.agent.spawn` não consome o orçamento de
-  10 s, mas o processamento de cada evento sim; o parser deve ser leve.
+- Valores exatos de `e.origin.kind` para o próprio usuário (ler `PromptOrigin` nos
+  tipos).
+- Re-registro de agentes nativos durante a sessão vale a partir do turno seguinte.
+- O processamento de cada evento do Codex consome o orçamento do hook; o parser deve
+  ser leve.
