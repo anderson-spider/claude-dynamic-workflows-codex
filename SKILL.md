@@ -668,7 +668,7 @@ run-workflow <script.js>
   --effort E       none|minimal|low|medium|high|xhigh; flat fallback; unset → user config or model default
   --auto-effort    scale effort to layer width: 1→xhigh, 2+→high (floor) (recommended; overrides --effort)
   --pin-effort E   force ALL agents to effort E (overrides per-call effort)
-  --sandbox S      read-only | workspace-write | danger-full-access  (default workspace-write)
+  --sandbox S      read-only | workspace-write | danger-full-access  (ceiling; default workspace-write)
   --budget N       token ceiling backing budget.total / budget.remaining()
   --budget-meter M what budget.spent() counts: total (default) | output (native pool)
   --plan           dry run: count agents per phase/effort + estimate a --budget (no tokens)
