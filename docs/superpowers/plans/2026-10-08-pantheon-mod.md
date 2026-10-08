@@ -78,8 +78,10 @@ código definitivo.
   `$.clock.now()`.
 - [ ] **Step 2: Escrever `spike.test.ts`** com um teste que registra no `on` do teste um
   hook `process.spawn` (geradora) que emite `{ stream: 'stdout', text: '{"type":"thread.started","thread_id":"t1"}\n' }`
-  e termina com `{ code: 0 }`, chama `$.tool.call` do `spike_wait` e verifica que a
-  resposta chega. Rodar: `claude plugin test <pasta do spike>`.
+  e termina com `{ code: 0, signal: null }`, chama `$.tool.call` do `spike_wait` e
+  verifica que (a) a geradora foi chamada com `argv` `['sleep', '<seconds>']` e (b) a
+  resposta traz o `thread_id` `t1`, que só o fake produz. Rodar:
+  `claude plugin test <pasta do spike>`.
 - [ ] **Step 3: Carregar com hot reload** (aceitar o "Enable hot reloading for this
   session?" quando o usuário responder) e pedir ao modelo nesta sessão:
   `spike_wait({ seconds: 360, foregroundSeconds: 400 })` (foreground longo) e depois
@@ -93,8 +95,10 @@ código definitivo.
   3. o hook `process.spawn` do teste substitui o spawn real;
   4. `claude plugin test` funciona dentro do sandbox do Codex.
 - [ ] **Step 6: Decidir.** Se 1 ou 2 falhar: parar e revisar o spec com o usuário. Se 3
-  falhar: a Task 5 recebe `spawn` injetável e os testes usam um fake (isso já é o
-  desenho abaixo; o hook do teste vira só validação extra). Se 4 falhar: as frentes
+  falhar: a Task 5 já recebe `spawn` injetável e testa com fake; a Task 7 troca o
+  teste de integração "delegate runs codex through process.spawn hook" por um teste
+  com o `spawn` do `createJobs` substituído via uma fábrica exportada
+  (`createRuntime(deps)` em `register.tsx`). Se 4 falhar: as frentes
   rodam só `tsc` e eu rodo `claude plugin test` na integração de cada frente.
 
 #### Resultado da Task 0
@@ -113,10 +117,13 @@ código definitivo.
   `docs/superpowers/`, `.claude/agents/`, `package.json`, `package-lock.json` (se
   existir), conteúdo atual de `.claude-plugin/`
 - Move: `docs/superpowers/fixtures/codex-exec-sample.jsonl` →
-  `hooks/fixtures/codex-exec-sample.jsonl`
+  `hooks/fixtures/codex-exec-sample.ts` (`export const CODEX_EXEC_SAMPLE = \`...\``,
+  conteúdo idêntico; importável pelos testes sem `$.fs`)
 - Create: `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
   `hooks/hooks.json`, `hooks/register.tsx` (stub), `types/index.d.ts`,
-  `hooks/types.ts`, `tsconfig.json`, `hooks/smoke.test.ts`
+  `hooks/types.ts`, `tsconfig.json`, `hooks/smoke.test.ts`,
+  `vendor/claude-code/` (tipos da API copiados), `.gitignore` (com
+  `.claude-plugin/types/`)
 
 **Interfaces:**
 - Produces: `hooks/types.ts` (abaixo) — o contrato que as frentes A, B e C usam.
@@ -173,6 +180,12 @@ export type SpawnEnd = { code: number | null; signal?: string | null }
 export type Spawn = (req: { argv: string[]; cwd: string; input: string }) =>
   AsyncIterable<SpawnChunk> & { result: Promise<SpawnEnd>; return?: () => unknown }
 export type ReadFile = (path: string) => Promise<string | undefined>
+export interface Clock {
+  now: () => Promise<number>
+  after: (ms: number, fn: () => void) => { cancel: () => void }
+}
+export type PromptKey = CodexRole | NativeRole | 'councillor'
+export type RolePrompts = (key: PromptKey) => string
 export type StatReal = (path: string) => Promise<string | undefined> // realPath ou undefined
 ```
 
@@ -181,10 +194,16 @@ export type StatReal = (path: string) => Promise<string | undefined> // realPath
   stub `register.tsx` exportando `register: Register` vazio.
 - [ ] **Step 5: Escrever `hooks/smoke.test.ts`:** `test('types load', () => { expect(1).toBe(1) })`
   importando `../hooks/types` sem erro.
-- [ ] **Step 6: Verificar.** Run: `claude plugin validate . && claude plugin test .`
-  Expected: validate sem erros; 1 teste passando. Depois do primeiro carregamento,
-  `tsconfig.json` estende `.claude-plugin/types/tsconfig.json` e `tsc -p .` passa.
-- [ ] **Step 7: Commit:** `chore: replace runner with pantheon mod skeleton`
+- [ ] **Step 6: Vendorizar os tipos.** Carregar o mod uma vez nesta sessão (hot reload)
+  para o engine gerar `.claude-plugin/types/`; copiar `claude-code/index.d.ts` e
+  `claude-code-tools/index.d.ts` de lá para `vendor/claude-code/` e anotar a versão do
+  Claude Code (2.1.295) num `vendor/claude-code/VERSION`. `tsconfig.json` próprio
+  (`strict`, `noEmit`, `jsx` conforme o `tsconfig.json` gerado, `paths` mapeando
+  `claude-code` e `claude-code/testing` para `vendor/claude-code/`), sem depender de
+  arquivo gerado. Assim `tsc -p .` funciona em qualquer worktree e na CI.
+- [ ] **Step 7: Verificar.** Run: `claude plugin validate . && claude plugin test . && tsc -p .`
+  Expected: validate sem erros; 1 teste passando; tsc sem erros.
+- [ ] **Step 8: Commit:** `chore: replace runner with pantheon mod skeleton`
 
 ---
 
@@ -194,7 +213,8 @@ Cada frente roda num pane herdr, Codex padrão com `-s workspace-write -a never`
 worktree próprio criado a partir do commit da Task 1:
 `git worktree add ../pantheon-<frente> -b andersonsilva/pantheon-<frente>`. O prompt
 de cada frente contém: o caminho do plano e do spec, a task inteira, a lista de
-arquivos permitidos, o comando de teste decidido na Task 0 e o formato de relatório
+arquivos permitidos, o comando de teste (`claude plugin test .`, que roda todos os
+`*.test.ts` da pasta; não há filtro por arquivo) e o formato de relatório
 `<summary>/<changes>/<verification>`. A frente não commita; o orchestrator revisa,
 commita no worktree da frente e faz o merge na `andersonsilva/pantheon-mod`.
 
@@ -228,7 +248,7 @@ test('unknown field is an error', ...)       // {"agents":{"fixer":{"modle":"x"}
 test('origins report where each field came from', ...) // origins['foregroundMinutes'] === 'project'
 ```
 
-- [ ] **Step 2:** Run `<cmd de teste> hooks/config.test.ts` → FAIL (módulo inexistente).
+- [ ] **Step 2:** Run `claude plugin test .` → FAIL em `config.test.ts` (módulo inexistente).
 - [ ] **Step 3: Implementar `loadConfig`.** Merge em três camadas (padrão, usuário,
   projeto); `sandboxCap` pela ordem `read-only` < `workspace-write` (vence o mais
   restritivo); `noNetwork` por OR; `disabledAgents` por união; demais campos por
@@ -246,11 +266,15 @@ test('origins report where each field came from', ...) // origins['foregroundMin
 "Ferramenta delegate".
 
 **Interfaces:**
-- Consumes: `PantheonConfig`, `DelegateArgs`, `CodexCall`, `Sandbox`, `StatReal`.
+- Consumes: `PantheonConfig`, `DelegateArgs`, `CodexCall`, `Sandbox`, `StatReal`,
+  `RolePrompts`.
 - Produces:
   - `CODEX_ROLES: CodexRole[]`, `NATIVE_ROLES: NativeRole[]`
-  - `resolveCodexCall(config: PantheonConfig, args: DelegateArgs, ctx: { cwd: string; skipGitRepoCheck: boolean; resumeSessionId?: string }): CodexCall | { error: string }`
-  - `nativeAgentSpecs(config: PantheonConfig, prompts: (role: string) => string): Array<{ name: string; description: string; prompt: string; model?: string; effort?: string; tools?: string[] }>`
+  - `resolveCodexCall(config: PantheonConfig, args: DelegateArgs, ctx: { cwd: string; skipGitRepoCheck: boolean; resumeSessionId?: string }, prompts: RolePrompts): CodexCall | { error: string }`
+    (`councillor:<seat>` usa `prompts('councillor')`)
+  - `nativeAgentSpecs(config: PantheonConfig, prompts: RolePrompts): Array<{ name: string; description: string; prompt: string; model?: string; effort?: string; tools?: string[] }>`
+    — `name` é o nome curto (`oracle`, `designer`, `councillor-<seat>`); o engine
+    forma `pantheon:<name>`
   - `isOffered(config: PantheonConfig, agentType: string): boolean`
   - `authorizedRoot(sessionCwd: string, gitTopLevel: string | undefined): string`
   - `checkCwd(statReal: StatReal, root: string, cwd: string): Promise<string | { error: string }>`
@@ -284,9 +308,9 @@ test('non-pantheon agents are always offered', ...)
 
 - [ ] **Step 2:** Run → FAIL.
 - [ ] **Step 3: Implementar.** `resolveCodexCall` monta `prompt` como
-  `rolePrompt + (override.prompt ? '\n\n' + override.prompt : '') + '\n\n---\n\n' + args.prompt`,
-  recebendo `rolePrompt` de um parâmetro opcional `prompts` (padrão: identidade vazia;
-  a integração passa `rolePrompt` da Task 6). `checkCwd` compara por segmento
+  `prompts(key) + (override.prompt ? '\n\n' + override.prompt : '') + '\n\n---\n\n' + args.prompt`;
+  nos testes `prompts` é um fake (`k => '<' + k + '>'`); a integração passa
+  `rolePrompt` da Task 6. `checkCwd` compara por segmento
   (`root + '/'`), nunca por prefixo de string.
 - [ ] **Step 4:** Run → PASS.
 - [ ] **Step 5:** Relatório; commit `feat(roles): resolve codex calls, native specs and workspace`.
@@ -318,7 +342,7 @@ test('resume puts exec options before the subcommand', ...) // termina com ['res
 test('skip-git-repo-check only when asked', ...)
 test('writable_roots and ignore-rules always present', ...)
 test('fixture yields session, activity, message and usage', () => {
-  const r = createJsonlReader(); const ev = r.push(fixture); // hooks/fixtures/codex-exec-sample.jsonl
+  const r = createJsonlReader(); const ev = r.push(CODEX_EXEC_SAMPLE)
   expect(ev[0]).toEqual({ kind: 'session', sessionId: '01a11cfa-fdc8-7b61-a3ff-779df92a9d86' })
   expect(ev.filter(e => e.kind === 'message').at(-1)).toEqual({ kind: 'message', text: '3' })
   expect(ev.at(-1)).toEqual({ kind: 'usage', tokens: { input: 52107, cached: 25344, output: 68 } })
@@ -329,7 +353,7 @@ test('turn.failed and error become failed', ...)
 test('non-JSON line is ignored', ...)
 ```
 
-  A fixture é lida no teste com `await $.fs.read('hooks/fixtures/codex-exec-sample.jsonl')`.
+  A fixture vem de `import { CODEX_EXEC_SAMPLE } from './fixtures/codex-exec-sample'`.
 - [ ] **Step 2:** Run → FAIL.
 - [ ] **Step 3: Implementar.** Atividade de `command_execution`: `"$ <command>"`
   (com ` → <exit_code>` no `item.completed`); `agent_message` gera `message`; outros
@@ -343,21 +367,27 @@ test('non-JSON line is ignored', ...)
 delegação" (passos 2, 5–7), "Ferramenta delegate".
 
 **Interfaces:**
-- Consumes: `Spawn`, `CodexCall`, `Job`, `buildArgv`, `createJsonlReader`.
+- Consumes: `Spawn`, `Clock`, `CodexCall`, `Job`, `buildArgv`, `createJsonlReader`.
 - Produces:
-  - `createJobs(deps: { spawn: Spawn; now: () => number; newId: () => string; onChange: (jobs: Job[]) => void; notify: (text: string) => void; initial?: Job[] })`
+  - `createJobs(deps: { spawn: Spawn; clock: Clock; newId: () => string; onChange: (jobs: Job[]) => void; notify: (text: string) => void; initial?: Job[] })`
     retornando
-    `{ run(call: CodexCall, opts: { foregroundMs: number; background: boolean; signal?: AbortSignal; description?: string }): Promise<{ job: Job; outcome: 'done' | 'error' | 'background' | 'cancelled' }>; get(id: string): Job | undefined; cancel(id: string): Job | { error: string }; list(): Job[] }`
+    `{ run(call: CodexCall, opts: { foregroundMs: number; background: boolean; signal?: AbortSignal; description?: string }): Promise<{ job: Job; outcome: 'done' | 'error' | 'background' | 'cancelled' }>; get(id: string): Job | undefined; cancel(id: string): Job | { error: string }; resumeTarget(id: string): { sessionId: string; cwd: string; agent: string } | { error: string }; list(): Job[] }`
   - `markLost(jobs: Job[]): Job[]`
 
-- [ ] **Step 1: Testes que falham** (spawn falso controlado pelo teste; relógio por
-  `mock.clock(on)` ou `now` injetado):
+- [ ] **Step 1: Testes que falham** (spawn falso controlado pelo teste; `Clock` falso
+  em memória com `advance(ms)` que dispara os `after` vencidos):
 
 ```ts
 test('finishes in foreground with final message and sessionId', ...)
 test('exceeds foregroundMs -> background, then notify on finish', ...) // notify chamado 1x com texto contendo job.id e 'delegate_result'
 test('background:true returns immediately', ...)
 test('non-zero exit with no message -> error with code', ...)          // Review Focus 3: error contém 'código 2'
+test('non-zero exit after a message -> error, message kept in result', ...)
+test('turn.failed then exit 0 -> error', ...)
+test('exit 0 without agent_message -> error', ...)
+test('error includes the last stderr lines', ...)
+test('resumeTarget: unknown, still active, without sessionId -> error', ...)
+test('resumeTarget: done/cancelled/lost with sessionId -> sessionId, cwd, agent', ...)
 test('cancel kills process and marks cancelled', ...)                  // return() do iterável chamado
 test('abort signal in foreground kills process', ...)
 test('markLost turns running and background into lost, keeps sessionId', ...)
@@ -365,9 +395,9 @@ test('onChange receives every status transition', ...)
 ```
 
 - [ ] **Step 2:** Run → FAIL.
-- [ ] **Step 3: Implementar.** Corrida entre o fim do loop e um timer de
-  `foregroundMs` feito com `now()`/`setTimeout` injetável (o spike da Task 0 diz qual
-  relógio usar; registrar a escolha no relatório). Mensagem de `notify`:
+- [ ] **Step 3: Implementar.** Corrida entre o fim do loop e `clock.after(foregroundMs)`
+  (cancelado se o loop terminar antes). Em produção `Clock` é `$.clock` adaptado
+  (Task 7). Mensagem de `notify`:
   `"pantheon: job <id> (<agent>) terminou com <status>; use delegate_result({ jobId: '<id>' })."`.
 - [ ] **Step 4:** Run → PASS.
 - [ ] **Step 5:** Relatório; commit `feat(jobs): run codex jobs with foreground and background`.
@@ -385,7 +415,7 @@ dos papéis", "Council", "Integração com superpowers". Fontes:
 **Interfaces:**
 - Consumes: `PantheonConfig`.
 - Produces:
-  - `rolePrompt(role: 'explorer' | 'librarian' | 'fixer' | 'oracle' | 'designer' | 'councillor'): string`
+  - `rolePrompt: RolePrompts` (de `hooks/types.ts`)
   - `buildOrchestratorSection(config: PantheonConfig): string`
   - `matchesCouncilTrigger(text: string): boolean`
   - `isCouncilOrigin(kind: string | undefined): boolean`
@@ -449,12 +479,17 @@ test('disabled role line disappears', ...)
 - [ ] **Step 2: Testes que falham:**
 
 ```ts
-test('session.start registers tools and native agents', ...)   // $.tool.call lista os 3; agent.register recebeu pantheon:oracle, pantheon:designer, pantheon:councillor-beta
+test('session.start registers tools and native agents', ...)   // 3 ferramentas; agent.register recebeu name 'oracle', 'designer', 'councillor-beta'
 test('delegate refuses while config is invalid', ...)
 test('delegate runs codex through process.spawn hook and returns final message', ...)
 test('prompt.compose appends the orchestrator section last', ...)
 test('prompt.submit injects council block only for composer/bridge with trigger', ...)
 test('agent.offer hides disabled pantheon agents and fails closed', ...) // hook que lança → isOffered false
+test('agent.offer guard over budget -> pantheon:* hidden, others offered', { timeoutMs: 20000 }, ...) // guarda presa > 10 s
+test('resume: unknown job, active job, no sessionId -> error', ...)
+test('resume ignores a new cwd and reuses the stored one', ...)
+test('resume recomputes sandbox with a stricter current policy', ...)
+test('resume revalidates the stored cwd before spawning', ...)
 test('session.start marks leftover running/background jobs as lost', ...)
 test('valid config change re-registers native agents; invalid change does not', ...)
 test('skipGitRepoCheck is true only when git rev-parse fails', ...)
@@ -465,7 +500,11 @@ test('skipGitRepoCheck is true only when git rev-parse fails', ...)
   ferramentas (raiz por `git rev-parse --show-toplevel` via `$.process.run`; `checkCwd`
   via `$.fs.stat(p, { resolve: true })`; spawn via `$.process.spawn`; notify via
   `$.prompt.submit`; estado via `$.state`), `prompt.compose`, `prompt.submit`,
-  `agent.offer` com `.catch(() => ({ isOffered: false }))` para `pantheon:*`. No
+  `agent.offer` com `.catch(() => ({ isOffered: false }))` para `pantheon:*`.
+  `delegate` com `resume`: `jobs.resumeTarget(jobId)` → recusa `cwd` do argumento →
+  `checkCwd` no `cwd` gravado → `resolveCodexCall` com a config atual e
+  `resumeSessionId`. `Clock` de produção: `{ now: () => $.clock.now(), after: (ms, fn) => $.clock.after(ms, fn) }`
+  (ajustar à assinatura de `TimerCall`). No
   `prompt.compose`, se a config mudou e é válida, re-registrar os agentes nativos.
 - [ ] **Step 4:** Run `claude plugin test . && claude plugin validate . && tsc -p .` → PASS.
 - [ ] **Step 5:** Commit `feat: wire pantheon hooks`.
