@@ -39,7 +39,8 @@ Toda tarefa lê a seção do spec indicada nela.
   `~/dev/tools/oh-my-opencode-slim` @ `73739208`); crédito no README.
 - Commits em Conventional Commits, em inglês, sem menção a IA.
 - Papéis Codex não commitam (`.git` é somente leitura em `workspace-write`): nas frentes
-  do herdr, quem commita é o orchestrator desta sessão.
+  Codex, quem commita é o orchestrator desta sessão. Tudo chega à
+  `andersonsilva/pantheon-mod` por cherry-pick.
 
 ## Review Focus
 
@@ -121,12 +122,16 @@ código definitivo.
   conteúdo idêntico; importável pelos testes sem `$.fs`)
 - Create: `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
   `hooks/hooks.json`, `hooks/register.tsx` (stub), `types/index.d.ts`,
-  `hooks/types.ts`, `tsconfig.json`, `hooks/smoke.test.ts`,
+  `hooks/types.ts`, `hooks/defaults.ts`, `tsconfig.json`, `hooks/smoke.test.ts`,
   `vendor/claude-code/` (tipos da API copiados), `.gitignore` (com
   `.claude-plugin/types/`)
 
 **Interfaces:**
-- Produces: `hooks/types.ts` (abaixo) — o contrato que as frentes A, B e C usam.
+- Produces: `hooks/types.ts` (abaixo) e `hooks/defaults.ts` com
+  `DEFAULT_CONFIG: PantheonConfig` (valores exatos do exemplo de config do spec:
+  `sandboxCap` `workspace-write`, `noNetwork` false, `foregroundMinutes` 5,
+  `disabledAgents` [], agents e seats `alpha`/`beta` como no spec) — o contrato que as
+  cinco frentes usam.
 
 - [ ] **Step 1: Apagar os caminhos listados** com `git rm -r` e mover a fixture com
   `git mv`.
@@ -184,6 +189,10 @@ export interface Clock {
   now: () => Promise<number>
   after: (ms: number, fn: () => void) => { cancel: () => void }
 }
+export interface Codec {
+  buildArgv: (call: CodexCall) => string[]
+  createJsonlReader: () => { push(text: string): CodexEvent[]; end(): CodexEvent[] }
+}
 export type PromptKey = CodexRole | NativeRole | 'councillor'
 export type RolePrompts = (key: PromptKey) => string
 export type StatReal = (path: string) => Promise<string | undefined> // realPath ou undefined
@@ -211,21 +220,26 @@ export type StatReal = (path: string) => Promise<string | undefined> // realPath
 
 Cada frente roda num pane herdr, Codex padrão com `-s workspace-write -a never`, num
 worktree próprio criado a partir do commit da Task 1:
-`git worktree add ../pantheon-<frente> -b andersonsilva/pantheon-<frente>`. O prompt
+`git worktree add ../pantheon-task<N> -b andersonsilva/pantheon-task<N>` (N = 2…6).
+As cinco frentes começam juntas. O prompt
 de cada frente contém: o caminho do plano e do spec, a task inteira, a lista de
 arquivos permitidos, o comando de teste (`claude plugin test .`, que roda todos os
 `*.test.ts` da pasta; não há filtro por arquivo) e o formato de relatório
-`<summary>/<changes>/<verification>`. A frente não commita; o orchestrator revisa,
-commita no worktree da frente e faz o merge na `andersonsilva/pantheon-mod`.
+`<summary>/<changes>/<verification>`. Executor (decidido na Task 0): Codex no herdr
+(não commita; o orchestrator revisa e commita no worktree da frente) ou subagente
+Claude com `isolation: worktree` (commita sozinho; o orchestrator revisa). Em ambos os
+casos o orchestrator leva o commit para a `andersonsilva/pantheon-mod` com
+`git cherry-pick <sha>`, um por tarefa, na ordem 2, 3, 4, 5, 6, e roda
+`claude plugin test .` depois de cada um.
 
-### Task 2 (frente A): config
+### Task 2 (frente 1): config
 
 **Files:** Create `hooks/config.ts`, Test `hooks/config.test.ts`. Spec: "Configuração".
 
 **Interfaces:**
 - Consumes: `PantheonConfig`, `ConfigResult`, `ReadFile` de `hooks/types.ts`.
+- Consumes também: `DEFAULT_CONFIG` de `hooks/defaults.ts`.
 - Produces:
-  - `DEFAULT_CONFIG: PantheonConfig`
   - `loadConfig(read: ReadFile, paths: { user: string; project?: string }, lastValid?: PantheonConfig): Promise<ConfigResult>`
 
 - [ ] **Step 1: Testes que falham:**
@@ -259,7 +273,7 @@ test('origins report where each field came from', ...) // origins['foregroundMin
 - [ ] **Step 4:** Run → PASS.
 - [ ] **Step 5:** Relatório; o orchestrator commita `feat(config): load and merge pantheon config`.
 
-### Task 3 (frente A): roles e workspace
+### Task 3 (frente 2): roles e workspace
 
 **Files:** Create `hooks/roles.ts`, `hooks/workspace.ts`; Test `hooks/roles.test.ts`,
 `hooks/workspace.test.ts`, `hooks/offer.test.ts`. Spec: "Papéis", "Workspace",
@@ -315,7 +329,7 @@ test('non-pantheon agents are always offered', ...)
 - [ ] **Step 4:** Run → PASS.
 - [ ] **Step 5:** Relatório; commit `feat(roles): resolve codex calls, native specs and workspace`.
 
-### Task 4 (frente B): codex argv e parser
+### Task 4 (frente 3): codex argv e parser
 
 **Files:** Create `hooks/codex.ts`; Test `hooks/codex.test.ts`. Spec: "Fluxo de uma
 delegação" (passos 3–4), "Workspace".
@@ -361,15 +375,17 @@ test('non-JSON line is ignored', ...)
 - [ ] **Step 4:** Run → PASS.
 - [ ] **Step 5:** Relatório; commit `feat(codex): build exec argv and parse json events`.
 
-### Task 5 (frente B): jobs
+### Task 5 (frente 4): jobs
 
 **Files:** Create `hooks/jobs.ts`; Test `hooks/jobs.test.ts`. Spec: "Fluxo de uma
 delegação" (passos 2, 5–7), "Ferramenta delegate".
 
 **Interfaces:**
-- Consumes: `Spawn`, `Clock`, `CodexCall`, `Job`, `buildArgv`, `createJsonlReader`.
+- Consumes: `Spawn`, `Clock`, `CodexCall`, `Job`, `Codec` de `hooks/types.ts` (não
+  importa `hooks/codex.ts`: a Task 4 roda em paralelo).
 - Produces:
-  - `createJobs(deps: { spawn: Spawn; clock: Clock; newId: () => string; onChange: (jobs: Job[]) => void; notify: (text: string) => void; initial?: Job[] })`
+  - `createJobs(deps: { spawn: Spawn; clock: Clock; codec: Codec; newId: () => string; onChange: (jobs: Job[]) => void; notify: (text: string) => void; initial?: Job[] })`
+    — os testes usam um `Codec` falso (argv fixo, reader que converte linhas `ev:<json de CodexEvent>`)
     retornando
     `{ run(call: CodexCall, opts: { foregroundMs: number; background: boolean; signal?: AbortSignal; description?: string }): Promise<{ job: Job; outcome: 'done' | 'error' | 'background' | 'cancelled' }>; get(id: string): Job | undefined; cancel(id: string): Job | { error: string }; resumeTarget(id: string): { sessionId: string; cwd: string; agent: string } | { error: string }; list(): Job[] }`
   - `markLost(jobs: Job[]): Job[]`
@@ -402,7 +418,7 @@ test('onChange receives every status transition', ...)
 - [ ] **Step 4:** Run → PASS.
 - [ ] **Step 5:** Relatório; commit `feat(jobs): run codex jobs with foreground and background`.
 
-### Task 6 (frente C): prompts
+### Task 6 (frente 5): prompts
 
 **Files:** Create `hooks/prompts/roles.ts`, `hooks/prompts/orchestrator.ts`,
 `hooks/prompts/council.ts`, `hooks/prompts/superpowers.ts`; Test
@@ -474,8 +490,8 @@ test('disabled role line disappears', ...)
 **Interfaces:**
 - Consumes: todas as Produces das Tasks 2–6.
 
-- [ ] **Step 1: Merge das frentes** `andersonsilva/pantheon-{a,b,c}` em
-  `andersonsilva/pantheon-mod`; rodar `claude plugin test .` → PASS.
+- [ ] **Step 1: Conferir os cherry-picks** das Tasks 2–6 na `andersonsilva/pantheon-mod`
+  (`git log --oneline` mostra os cinco commits); rodar `claude plugin test . && tsc -p .` → PASS.
 - [ ] **Step 2: Testes que falham:**
 
 ```ts
@@ -495,7 +511,8 @@ test('valid config change re-registers native agents; invalid change does not', 
 test('skipGitRepoCheck is true only when git rev-parse fails', ...)
 ```
 
-- [ ] **Step 3: Implementar** ligando: `session.start` (carrega config, `markLost`,
+- [ ] **Step 3: Implementar** ligando (o `Codec` de produção é
+  `{ buildArgv, createJsonlReader }` de `hooks/codex.ts`): `session.start` (carrega config, `markLost`,
   registra ferramentas com `isDeferred: false` e agentes nativos), `tool.call` das três
   ferramentas (raiz por `git rev-parse --show-toplevel` via `$.process.run`; `checkCwd`
   via `$.fs.stat(p, { resolve: true })`; spawn via `$.process.spawn`; notify via
@@ -567,11 +584,11 @@ test('/pantheon doctor reports codex, login and config', ...)
 ## Ordem e paralelismo
 
 ```
-Task 0 → Task 1 → ┌ frente A: Task 2 → Task 3
-                  ├ frente B: Task 4 → Task 5
-                  └ frente C: Task 6
-                  → Task 7 → Task 8 → Task 9 → Task 10
+Task 0 → Task 1 → [Task 2] [Task 3] [Task 4] [Task 5] [Task 6]   (paralelo, worktrees)
+                → cherry-pick 2, 3, 4, 5, 6 na pantheon-mod
+                → Task 7 → Task 8 → Task 9 → Task 10
 ```
 
-Frentes A, B e C não compartilham arquivos; só leem `hooks/types.ts` (congelado depois
-da Task 1 — mudança nele passa pelo orchestrator e é propagada às três).
+As cinco frentes não compartilham arquivos; só leem `hooks/types.ts` e
+`hooks/defaults.ts` (congelados depois da Task 1 — mudança neles passa pelo
+orchestrator e é propagada a todas as frentes ainda abertas).
