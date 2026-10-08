@@ -29,13 +29,13 @@ Um time no estilo oh-my-opencode-slim, com o Claude Code como orquestrador.
 
 **Quem roda onde**
 
-| Papel | Harness | Como chamar | Sandbox | Modelo inicial |
-|---|---|---|---|---|
-| `scout`: mapeia código, devolve `caminho:linha` | Codex | `agent(prompt, { agentType: "scout" })` | `read-only` | `gpt-6-luna` |
-| `librarian`: docs e APIs, com fonte e versão | Codex | `agent(prompt, { agentType: "librarian" })` | `read-only` | `gpt-6-luna` |
-| `fixer`: implementa o plano recebido e roda os testes | Codex | `agent(prompt, { agentType: "fixer" })` | `workspace-write` | `gpt-6.1-sol` |
-| `oracle`: arquitetura e code review, não edita | Claude | Agent tool nativo (`subagent_type: "oracle"`) | — | `opus` |
-| `designer`: UI e front-end | Claude | Agent tool nativo (`subagent_type: "designer"`) | — | `opus` |
+| Papel | Harness | Como chamar | Modelo inicial |
+|---|---|---|---|
+| `scout`: mapeia código, devolve `caminho:linha` | Codex | `agent(prompt, { agentType: "scout" })` | `gpt-6-luna` |
+| `librarian`: docs e APIs, com fonte e versão | Codex | `agent(prompt, { agentType: "librarian" })` | `gpt-6-luna` |
+| `fixer`: implementa o plano recebido e roda os testes | Codex | `agent(prompt, { agentType: "fixer" })` | `gpt-6.1-sol` |
+| `oracle`: arquitetura e code review, não edita | Claude | Agent tool nativo (`subagent_type: "oracle"`) | `opus` |
+| `designer`: UI e front-end | Claude | Agent tool nativo (`subagent_type: "designer"`) | `opus` |
 
 Os papéis ficam em [`.claude/agents/`](.claude/agents). O runner recusa
 `oracle` e `designer` como `agentType` (também em `--plan`), com um erro que
@@ -82,8 +82,12 @@ caminho do arquivo e o campo.
 `--pin-model` e `--pin-effort` continuam acima de tudo. O `--frontier` (que o skill
 sempre passa) substitui o `model` escrito no script, mas **não** o modelo do papel:
 scout, librarian e fixer mantêm o próprio modelo, e só agentes sem modelo de papel
-rodam no frontier. Agentes sem `agentType` mantêm o padrão global
-(`workspace-write`).
+rodam no frontier.
+
+**Sandbox.** Os papéis incluídos não definem `sandbox`: scout, librarian e fixer
+rodam com o sandbox do `agent()` ou do `--sandbox` (padrão `workspace-write`). Um
+`sandbox` no `roles.json` ou no frontmatter continua aceito e fica acima do
+`--sandbox`.
 
 **Workflow mínimo** (uma chamada, para medir latência):
 
@@ -94,8 +98,8 @@ node runner/bin/summarize-run.js .workflow-journal/single-role.workflow.jsonl   
 ```
 
 > **Aviso.** As threads do Codex continuam com `approvalPolicy: "never"`: nenhum
-> comando pede aprovação. O sandbox de cada papel é o único controle sobre o que
-> o agente pode alterar.
+> comando pede aprovação. O sandbox (do `agent()`, do `--sandbox` ou de um
+> papel que o defina) é o único controle sobre o que o agente pode alterar.
 
 ---
 

@@ -4,7 +4,6 @@ description: Codex role: do not invoke through the native Agent tool; run it via
 harness: codex
 model: haiku
 effort: medium
-sandbox: read-only
 ---
 You are scout. You find and map code in the current repository.
 

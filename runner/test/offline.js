@@ -198,26 +198,26 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
   const home = await mkdtemp(join(tmpdir(), "wf-home-"));
   const scout = await loadAgentType("scout", REPO_ROOT, { home });
   assert.equal(scout.harness, "codex");
-  assert.equal(scout.sandbox, "read-only", "scout is read-only");
+  assert.equal(scout.sandbox, undefined, "bundled roles leave the sandbox to the runner");
   assert.equal(scout.effort, "medium");
   assert.match(scout.systemPrompt, /You are scout/);
   assert.equal(scout.source, join(REPO_ROOT, ".claude", "agents", "scout.md"));
   const librarian = await loadAgentType("librarian", REPO_ROOT, { home });
-  assert.equal(librarian.sandbox, "read-only", "librarian is read-only");
+  assert.equal(librarian.sandbox, undefined);
   const fixer = await loadAgentType("fixer", REPO_ROOT, { home });
-  assert.equal(fixer.sandbox, "workspace-write", "fixer writes the workspace");
+  assert.equal(fixer.sandbox, undefined);
   assert.equal(fixer.effort, "high");
   for (const name of ["oracle", "designer"]) {
     const def = await loadAgentType(name, REPO_ROOT, { home });
     assert.equal(def.harness, "claude", `${name} is a Claude role`);
     assert.equal(def.model, "opus");
   }
-  // The committed example parses and matches the frontmatter sandboxes.
+  // The committed example parses and, like the frontmatter, sets no sandbox.
   const example = validateRolesFile(
     JSON.parse(await readFile(join(REPO_ROOT, "examples", "roles.example.json"), "utf8")),
     "roles.example.json",
   );
-  assert.equal(example.scout.sandbox, "read-only");
+  for (const name of ["scout", "librarian", "fixer"]) assert.equal(example[name].sandbox, undefined);
   assert.equal(example.fixer.model, "gpt-6.1-sol");
   assert.equal(example.oracle.harness, "claude");
   // The global default sandbox is unchanged for agents without a role.
@@ -353,9 +353,9 @@ const SCOUT_MD = "---\nname: scout\nharness: codex\nmodel: haiku\neffort: medium
     () => agent("c", { agentType: "fixer" }),
     () => agent("d"),
   ]);`);
-  assert.deepEqual(r[0], { sandbox: "read-only", effort: "medium" }, "scout: read-only without a script sandbox");
-  assert.deepEqual(r[1], { sandbox: "read-only", effort: "medium" }, "librarian: read-only");
-  assert.deepEqual(r[2], { sandbox: "workspace-write", effort: "high" }, "fixer: workspace-write");
+  assert.deepEqual(r[0], { sandbox: null, effort: "medium" }, "scout: no role sandbox");
+  assert.deepEqual(r[1], { sandbox: null, effort: "medium" }, "librarian: no role sandbox");
+  assert.deepEqual(r[2], { sandbox: null, effort: "high" }, "fixer: no role sandbox");
   assert.deepEqual(r[3], { sandbox: null, effort: null }, "no role -> runner defaults untouched");
 
   // Role over runner defaults (--sandbox/--effort/--auto-effort); agent() options over the role.
@@ -364,9 +364,15 @@ const SCOUT_MD = "---\nname: scout\nharness: codex\nmodel: haiku\neffort: medium
     () => agent("b", { agentType: "scout", sandbox: "workspace-write", effort: "low" }),
     () => agent("c"),
   ]);`, { defaults: { sandbox: "danger-full-access", effort: "xhigh" }, autoEffort: true });
-  assert.deepEqual(d[0], { sandbox: "read-only", effort: "medium" }, "role beats --sandbox, --effort and --auto-effort");
+  assert.deepEqual(d[0], { sandbox: "danger-full-access", effort: "medium" }, "role effort beats --effort and --auto-effort; --sandbox applies");
   assert.deepEqual(d[1], { sandbox: "workspace-write", effort: "low" }, "per-call options beat the role");
   assert.deepEqual(d[2], { sandbox: "danger-full-access", effort: "high" }, "non-role agents keep the runner defaults");
+  // A role that does set a sandbox still beats --sandbox; agent() still beats the role.
+  const sb = await run(`return await parallel([
+    () => agent("a", { agentType: "ro" }),
+    () => agent("b", { agentType: "ro", sandbox: "workspace-write" }),
+  ]);`, { defaults: { sandbox: "danger-full-access" }, loadRole: async () => ({ sandbox: "read-only", sources: {} }) });
+  assert.deepEqual(sb.map((x) => x.sandbox), ["read-only", "workspace-write"], "role sandbox over --sandbox, per-call over role");
   const pinned = await run('return await agent("a", { agentType: "scout" });', { pinnedEffort: "xhigh" });
   assert.equal(pinned.effort, "xhigh", "--pin-effort stays authoritative");
 
