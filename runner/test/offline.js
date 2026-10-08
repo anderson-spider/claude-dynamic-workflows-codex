@@ -148,8 +148,16 @@ const exec = promisify(execFile);
   assert.equal(resolveModel("inherit", have), undefined, "inherit -> config default");
   assert.equal(resolveModel(undefined, have), undefined, "undefined -> config default");
   assert.equal(resolveModel("made-up-model", have), undefined, "unknown -> config default");
-  assert.equal(resolveModel("claude-opus", []), "gpt-5.6-sol", "claude maps even with empty model list");
+  assert.equal(resolveModel("claude-opus", []), "gpt-6-astra", "claude maps even with empty model list");
   assert.equal(resolveModel("gpt-5.6", []), "gpt-5.6-sol", "family alias maps even with empty model list");
+
+  const gpt6 = ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", ...have];
+  assert.equal(resolveModel("claude-opus-4-8", gpt6), "gpt-6-astra", "opus -> GPT-6 Astra");
+  assert.equal(resolveModel("sonnet", gpt6), "gpt-6.1-sol", "sonnet -> GPT-6.1 Sol");
+  assert.equal(resolveModel("haiku", gpt6), "gpt-6-luna", "haiku -> GPT-6 Luna");
+  assert.equal(resolveModel("sonnet", []), "gpt-6.1-sol", "sonnet top preference with empty model list");
+  assert.equal(resolveModel("haiku", []), "gpt-6-luna", "haiku top preference with empty model list");
+  assert.equal(resolveModel("gpt-6-luna", gpt6), "gpt-6-luna", "explicit GPT-6 id passes through");
 
   const legacy = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"];
   assert.equal(resolveModel("opus", legacy), "gpt-5.5", "older catalogs retain the Opus fallback");

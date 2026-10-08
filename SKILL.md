@@ -733,8 +733,9 @@ run-workflow <script.js>
   The *agents* do all file/command I/O (via the Codex sandbox). Don't write a
   script that tries to read files itself — have an `agent()` do it.
 - **Model mapping** — a script that requests `claude-opus-4-8` or a bare
-  `opus`/`sonnet`/`haiku` maps Opus → Sol, Sonnet → Terra, and Haiku → Luna when
-  those GPT-5.6 Codex tiers are available, with an available-model fallback.
+  `opus`/`sonnet`/`haiku` maps Opus → `gpt-6-astra`, Sonnet → `gpt-6.1-sol`, and
+  Haiku → `gpt-6-luna` when available, falling back to the GPT-5.6 tiers (Sol,
+  Terra, Luna) and then any available model.
   Don't rely on that: pin every agent with `--frontier` (or
   `--pin-model gpt-5.6-sol`) — see
   *Model*. (`--model` is only the *fallback* default; a per-call `model` in the

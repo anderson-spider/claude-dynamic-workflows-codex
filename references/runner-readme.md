@@ -388,9 +388,10 @@ A persisted script written for Claude Code rarely needs editing to run here:
 
 - **Model translation** — the GPT-5.6 Codex series is Sol (flagship), Terra
   (balanced), and Luna (efficient). A script (or `agentType`) that asks for
-  `claude-opus-4-8`, or a bare `opus`/`sonnet`/`haiku` alias, maps Opus → Sol,
-  Sonnet → Terra, and Haiku → Luna when available (queried once via
-  `model/list`, with an available-model fallback). Unknown/`inherit` → Codex
+  `claude-opus-4-8`, or a bare `opus`/`sonnet`/`haiku` alias, maps Opus →
+  `gpt-6-astra`, Sonnet → `gpt-6.1-sol`, and Haiku → `gpt-6-luna` when available
+  (queried once via `model/list`), then falls back to the GPT-5.6 tiers (Sol,
+  Terra, Luna) and any available model. Unknown/`inherit` → Codex
   config default. `--frontier` bypasses this routing and dynamically pins the
   whole run to the current flagship, now `gpt-5.6-sol`.
 - **`agentType`** — `agent(p, { agentType: 'reviewer' })` loads
