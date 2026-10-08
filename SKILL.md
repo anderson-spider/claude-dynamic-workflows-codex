@@ -542,6 +542,12 @@ the override. (To pin a specific model instead, use `--pin-model gpt-5.6-sol`.)
 Also good practice, though `--frontier` makes it non-essential: don't set a
 per-call `model` in scripts — leave `model` out of every `agent()` opts object.
 
+**Exception — role agents (this fork).** An `agent()` with an `agentType` whose
+role sets a model (frontmatter or `roles.json`, e.g. `scout`, `librarian`,
+`fixer`) keeps that model under `--frontier`; only agents without a role model
+get the frontier. Keep passing `--frontier` as usual. `--pin-model` still forces
+one model on every agent, roles included.
+
 Need to bound cost? Lower effort (see below) and set `--budget` — do not switch models.
 
 ## Effort: scale thinking to layer width
@@ -656,7 +662,7 @@ ask many), `flaky-bug-perturbation` (hold + perturb live state), `hedged-take-fi
 ```
 run-workflow <script.js>
   --args JSON | --args-file PATH   value exposed to the script as `args`
-  --frontier       pin ALL agents to the auto-detected latest frontier model (recommended; overrides per-call model)
+  --frontier       run agents on the auto-detected latest frontier model (recommended; overrides per-call model; agentType roles keep their own model)
   --pin-model M    pin ALL agents to model M (overrides per-call model)
   --model M        fallback model when not pinned; Claude ids/aliases auto-map
   --effort E       none|minimal|low|medium|high|xhigh; flat fallback; unset → user config or model default

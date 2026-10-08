@@ -79,8 +79,11 @@ caminho do arquivo e o campo.
 **Precedência** (da maior para a menor): opções passadas no `agent()` >
 `roles.json` (projeto > usuário) > frontmatter do papel > padrões do runner
 (`--sandbox`, `--effort`, `--auto-effort`, `--model` e o padrão do Codex).
-`--pin-model`/`--frontier` e `--pin-effort` continuam acima de tudo. Agentes sem
-`agentType` mantêm o padrão global (`workspace-write`).
+`--pin-model` e `--pin-effort` continuam acima de tudo. O `--frontier` (que o skill
+sempre passa) substitui o `model` escrito no script, mas **não** o modelo do papel:
+scout, librarian e fixer mantêm o próprio modelo, e só agentes sem modelo de papel
+rodam no frontier. Agentes sem `agentType` mantêm o padrão global
+(`workspace-write`).
 
 **Workflow mínimo** (uma chamada, para medir latência):
 

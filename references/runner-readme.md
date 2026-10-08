@@ -115,7 +115,7 @@ run-workflow <script.js>
   --tui               open a live ASCII map of the run in a new terminal window
   --gui               open a live HTML viewer of the run in your browser  (--monitor = both)
   --model M           fallback model (Claude ids/aliases auto-mapped); omit for config default
-  --frontier          pin ALL agents to the auto-detected latest frontier model (currently gpt-5.6-sol; dynamic)
+  --frontier          run agents on the auto-detected latest frontier model (dynamic); agentType roles keep their own model
   --pin-model M       pin ALL agents to model M (overrides per-call model)
   --effort E          none|minimal|low|medium|high|xhigh (flat fallback; unset inherits user config/model default)
   --auto-effort       scale effort to each layer's parallel width: 1->xhigh, 2+->high (floor)
@@ -392,8 +392,9 @@ A persisted script written for Claude Code rarely needs editing to run here:
   `gpt-6-astra`, Sonnet → `gpt-6.1-sol`, and Haiku → `gpt-6-luna` when available
   (queried once via `model/list`), then falls back to the GPT-5.6 tiers (Sol,
   Terra, Luna) and any available model. Unknown/`inherit` → Codex
-  config default. `--frontier` bypasses this routing and dynamically pins the
-  whole run to the current flagship, now `gpt-5.6-sol`.
+  config default. `--frontier` bypasses this routing and runs every agent on the
+  current flagship, except agents whose `agentType` role sets a model: those keep
+  the role's model.
 - **`agentType`** — `agent(p, { agentType: 'reviewer' })` loads
   `.claude/agents/reviewer.md` (project scope first, then `~/.claude`) and uses its
   body as `developerInstructions` and its frontmatter `model` as a fallback.
@@ -412,8 +413,8 @@ A persisted script written for Claude Code rarely needs editing to run here:
 `schema`, `model`, `agentType`, `effort`, `sandbox`, `cwd`, `systemPrompt`,
 `personality`, `isolation`, `retries`, `timeoutMs`, `label`, `phase`. Per-call `opts`
 override the CLI `--model/--effort/--sandbox/--retries` defaults — except that
-`--frontier`/`--pin-model` force the model and `--pin-effort` forces the effort
-regardless of `opts`. A per-call `effort` overrides `--auto-effort` (so omit it
+`--pin-model` forces the model, `--frontier` forces it for every agent without an
+`agentType` role model, and `--pin-effort` forces the effort regardless of `opts`. A per-call `effort` overrides `--auto-effort` (so omit it
 unless you deliberately want to escape the layer-width policy for one agent).
 
 ## Implemented vs. extension points
