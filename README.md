@@ -23,6 +23,95 @@ This repo is **two ways in**:
 
 ---
 
+## Time de papéis (fork)
+
+Um time no estilo oh-my-opencode-slim, com o Claude Code como orquestrador.
+
+**Quem roda onde**
+
+| Papel | Harness | Como chamar | Modelo inicial |
+|---|---|---|---|
+| `scout`: mapeia código, devolve `caminho:linha` | Codex | `agent(prompt, { agentType: "scout" })` | `gpt-6-luna` |
+| `librarian`: docs e APIs, com fonte e versão | Codex | `agent(prompt, { agentType: "librarian" })` | `gpt-6-luna` |
+| `fixer`: implementa o plano recebido e roda os testes | Codex | `agent(prompt, { agentType: "fixer" })` | `gpt-6.1-sol` |
+| `oracle`: arquitetura e code review, não edita | Claude | Agent tool nativo (`subagent_type: "oracle"`) | `opus` |
+| `designer`: UI e front-end | Claude | Agent tool nativo (`subagent_type: "designer"`) | `opus` |
+
+Os papéis ficam em [`.claude/agents/`](.claude/agents). O runner recusa
+`oracle` e `designer` como `agentType` (também em `--plan`), com um erro que
+manda chamá-los pelo Agent tool nativo. A recusa vem do campo `harness: claude`
+no frontmatter ou no `roles.json`.
+
+**Instalação.** O runner procura `.claude/agents/<papel>.md` subindo a partir do
+diretório do projeto e depois em `~/.claude/agents`. Ele não procura dentro do
+diretório do plugin, então instalar o plugin não basta: copie ou faça links dos
+papéis para `~/.claude/agents` (ou para o `.claude/agents` do projeto):
+
+```bash
+REPO=~/src/claude-dynamic-workflows-codex   # um clone deste fork
+mkdir -p ~/.claude/agents
+for r in scout librarian fixer oracle designer; do
+  ln -sf "$REPO/.claude/agents/$r.md" ~/.claude/agents/
+done
+```
+
+Como esses arquivos ficam no mesmo registro do Agent tool, o Claude Code também
+lista `scout`, `librarian` e `fixer` como subagentes nativos (com `haiku`/`sonnet`).
+Pelo runner, esses aliases viram `gpt-6-luna`/`gpt-6.1-sol` (veja `runner/src/modelMap.js`).
+
+**`roles.json` (opcional).** Sem ele, tudo funciona só com o frontmatter.
+
+- Usuário: `~/.config/codex-workflows/roles.json`
+- Projeto: `.codex-workflows/roles.json` (procurado subindo a partir do diretório
+  atual). O do projeto tem precedência, campo a campo.
+
+```bash
+mkdir -p ~/.config/codex-workflows
+cp "$REPO/examples/roles.example.json" ~/.config/codex-workflows/roles.json
+```
+
+Formato: `{ "roles": { "<papel>": { "harness", "model", "effort", "sandbox" } } }`.
+`harness` é `codex` ou `claude`; `sandbox` é `read-only` ou `workspace-write`
+(`danger-full-access` é recusado); `effort` é um dos níveis do Codex
+(`none`…`xhigh`). Campo desconhecido ou valor inválido interrompe a carga com o
+caminho do arquivo e o campo.
+
+**Precedência** (da maior para a menor): opções passadas no `agent()` >
+`roles.json` (projeto > usuário) > frontmatter do papel > padrões do runner
+(`--effort`, `--auto-effort`, `--model` e o padrão do Codex). O sandbox tem regra
+própria, descrita abaixo.
+`--pin-model` e `--pin-effort` continuam acima de tudo. O `--frontier` (que o skill
+sempre passa) substitui o `model` escrito no script, mas **não** o modelo do papel:
+scout, librarian e fixer mantêm o próprio modelo, e só agentes sem modelo de papel
+rodam no frontier.
+
+**Sandbox.** Os papéis incluídos não definem `sandbox`: scout, librarian e fixer
+rodam com o sandbox do `agent()` ou do `--sandbox` (padrão `workspace-write`). Um
+`sandbox` no `roles.json` ou no frontmatter continua aceito. O `sandbox` passado no
+`agent()` vence o do papel, e o `--sandbox` funciona como teto para os dois: vale o
+mais restritivo (`read-only` < `workspace-write` < `danger-full-access`). Sem
+`--sandbox`, o teto é `workspace-write`; `danger-full-access` só com
+`--sandbox danger-full-access` explícito. Script e papel podem restringir o teto,
+nunca ampliar.
+
+**Rede.** No `workspace-write`, o runner liga o acesso à rede em todos os agentes,
+independente do `sandbox_workspace_write.network_access` do seu config do Codex.
+Use `--no-network` para desligar. O `read-only` continua sem rede.
+
+**Workflow mínimo** (uma chamada, para medir latência):
+
+```bash
+node runner/bin/run-workflow.js examples/single-role.workflow.js \
+  --args '{"role":"scout","prompt":"Where is agentType resolved?"}'
+node runner/bin/summarize-run.js .workflow-journal/single-role.workflow.jsonl   # tempo e tokens
+```
+
+> **Aviso.** As threads do Codex continuam com `approvalPolicy: "never"`: nenhum
+> comando pede aprovação. O sandbox (do `agent()` ou de um papel que o defina,
+> limitado pelo `--sandbox`) é o único controle sobre o que o agente pode alterar.
+
+---
+
 ## See it now (no Codex required)
 
 Want a look at a finished run before installing anything? The viewer is offline and self-contained, and the flagship demo is bundled:
@@ -138,7 +227,7 @@ You don't manage flags; you describe what you want and Claude wires it up. Commo
 | **See the size/cost first** | "plan it first — how many agents, roughly how much?" | a **no-token dry run** (`--plan`) that counts agents per phase and estimates a budget |
 | **Cap the spend** | "keep it under ~5M tokens" | a hard `--budget` ceiling — tripping it isn't fatal, it prints a one-line `--resume` to continue |
 | **Keep it read-only (safety)** | "read-only — don't let agents write files" | runs every agent with `--sandbox read-only` — a **safety** choice (agents read but never write); good for audits, research, exploration. Not a way to spend less. |
-| **Let it edit files** | "let it apply the migration" | `--sandbox workspace-write` (the default) so agents can write |
+| **Let it edit files** | "let it apply the migration" | `--sandbox workspace-write` (also the ceiling without the flag) so agents can write |
 | **Resume after a stop** | "resume that run" | replays already-finished agents from the journal **free**, runs only the rest; sessionful workers re-attach to their persisted threads **warm** |
 | **Be asked before risky steps** | "check with me before applying anything" | authors a `human()` gate — the live viewer shows an **answer card** (choices + free text) right in the run page; the run waits there, fleet warm, and falls back to a safe default on timeout |
 | **Pick a specific pattern** | "do a loop-until-dry bug hunt" · "fresh-context review with independent reviewers" | authors that exact pattern (see the [pattern library](references/authoring.md)) |
@@ -566,7 +655,7 @@ Full internals, the protocol mapping, and a faithfulness comparison vs. the nati
 
 ## Safety
 
-Workflow agents run with `approvalPolicy: "never"` inside a Codex sandbox (default `sandbox: workspace-write`) — like any autonomous agent run, they read, write, and execute shell commands **without prompting**. For untrusted or exploratory tasks, tell Claude to keep it **read-only** (or pass `--sandbox read-only`), and read a workflow script before you run it. The workflow *script itself* is isolated (no filesystem/network/process access) — only the agents act.
+Workflow agents run with `approvalPolicy: "never"` inside a Codex sandbox (default `sandbox: workspace-write`, with network access on unless `--no-network`) — like any autonomous agent run, they read, write, and execute shell commands **without prompting**. For untrusted or exploratory tasks, tell Claude to keep it **read-only** (or pass `--sandbox read-only`), and read a workflow script before you run it. The workflow *script itself* is isolated (no filesystem/network/process access) — only the agents act.
 
 ## Limitations (honest)
 

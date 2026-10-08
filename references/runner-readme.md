@@ -115,12 +115,15 @@ run-workflow <script.js>
   --tui               open a live ASCII map of the run in a new terminal window
   --gui               open a live HTML viewer of the run in your browser  (--monitor = both)
   --model M           fallback model (Claude ids/aliases auto-mapped); omit for config default
-  --frontier          pin ALL agents to the auto-detected latest frontier model (currently gpt-5.6-sol; dynamic)
+  --frontier          run agents on the auto-detected latest frontier model (dynamic); agentType roles keep their own model
   --pin-model M       pin ALL agents to model M (overrides per-call model)
   --effort E          none|minimal|low|medium|high|xhigh (flat fallback; unset inherits user config/model default)
   --auto-effort       scale effort to each layer's parallel width: 1->xhigh, 2+->high (floor)
   --pin-effort E      force ALL agents to effort E (overrides per-call effort)
-  --sandbox S         read-only | workspace-write | danger-full-access
+  --sandbox S         read-only | workspace-write | danger-full-access (a ceiling: per-call
+                      and role sandboxes can narrow it, never widen it; default workspace-write)
+  --no-network        turn off network access for workspace-write agents (on by default,
+                      whatever sandbox_workspace_write.network_access says in the Codex config)
   --retries N         transient-error retries per agent (default 3)
   --resume            reuse prior results from the journal (skip unchanged agents)
   --journal PATH      journal location (default .workflow-journal/<script>.jsonl)
@@ -388,11 +391,13 @@ A persisted script written for Claude Code rarely needs editing to run here:
 
 - **Model translation** — the GPT-5.6 Codex series is Sol (flagship), Terra
   (balanced), and Luna (efficient). A script (or `agentType`) that asks for
-  `claude-opus-4-8`, or a bare `opus`/`sonnet`/`haiku` alias, maps Opus → Sol,
-  Sonnet → Terra, and Haiku → Luna when available (queried once via
-  `model/list`, with an available-model fallback). Unknown/`inherit` → Codex
-  config default. `--frontier` bypasses this routing and dynamically pins the
-  whole run to the current flagship, now `gpt-5.6-sol`.
+  `claude-opus-4-8`, or a bare `opus`/`sonnet`/`haiku` alias, maps Opus →
+  `gpt-6-astra`, Sonnet → `gpt-6.1-sol`, and Haiku → `gpt-6-luna` when available
+  (queried once via `model/list`), then falls back to the GPT-5.6 tiers (Sol,
+  Terra, Luna) and any available model. Unknown/`inherit` → Codex
+  config default. `--frontier` bypasses this routing and runs every agent on the
+  current flagship, except agents whose `agentType` role sets a model: those keep
+  the role's model.
 - **`agentType`** — `agent(p, { agentType: 'reviewer' })` loads
   `.claude/agents/reviewer.md` (project scope first, then `~/.claude`) and uses its
   body as `developerInstructions` and its frontmatter `model` as a fallback.
@@ -410,10 +415,16 @@ A persisted script written for Claude Code rarely needs editing to run here:
 
 `schema`, `model`, `agentType`, `effort`, `sandbox`, `cwd`, `systemPrompt`,
 `personality`, `isolation`, `retries`, `timeoutMs`, `label`, `phase`. Per-call `opts`
-override the CLI `--model/--effort/--sandbox/--retries` defaults — except that
-`--frontier`/`--pin-model` force the model and `--pin-effort` forces the effort
-regardless of `opts`. A per-call `effort` overrides `--auto-effort` (so omit it
+override the CLI `--model/--effort/--retries` defaults — except that
+`--pin-model` forces the model, `--frontier` forces it for every agent without an
+`agentType` role model, and `--pin-effort` forces the effort regardless of `opts`. A per-call `effort` overrides `--auto-effort` (so omit it
 unless you deliberately want to escape the layer-width policy for one agent).
+`--sandbox` is a ceiling: a per-call or role `sandbox` applies only where it is
+at least as strict (`read-only` < `workspace-write` < `danger-full-access`).
+Without `--sandbox` the ceiling is `workspace-write`, so `danger-full-access`
+needs an explicit `--sandbox danger-full-access`. Direct callers of
+`codexAgent`/`startCodexSession` get the same rule through `sandboxCap` (default
+`workspace-write`) and can pass `networkAccess` to override the Codex config.
 
 ## Implemented vs. extension points
 

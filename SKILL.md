@@ -542,6 +542,12 @@ the override. (To pin a specific model instead, use `--pin-model gpt-5.6-sol`.)
 Also good practice, though `--frontier` makes it non-essential: don't set a
 per-call `model` in scripts — leave `model` out of every `agent()` opts object.
 
+**Exception — role agents (this fork).** An `agent()` with an `agentType` whose
+role sets a model (frontmatter or `roles.json`, e.g. `scout`, `librarian`,
+`fixer`) keeps that model under `--frontier`; only agents without a role model
+get the frontier. Keep passing `--frontier` as usual. `--pin-model` still forces
+one model on every agent, roles included.
+
 Need to bound cost? Lower effort (see below) and set `--budget` — do not switch models.
 
 ## Effort: scale thinking to layer width
@@ -656,13 +662,13 @@ ask many), `flaky-bug-perturbation` (hold + perturb live state), `hedged-take-fi
 ```
 run-workflow <script.js>
   --args JSON | --args-file PATH   value exposed to the script as `args`
-  --frontier       pin ALL agents to the auto-detected latest frontier model (recommended; overrides per-call model)
+  --frontier       run agents on the auto-detected latest frontier model (recommended; overrides per-call model; agentType roles keep their own model)
   --pin-model M    pin ALL agents to model M (overrides per-call model)
   --model M        fallback model when not pinned; Claude ids/aliases auto-map
   --effort E       none|minimal|low|medium|high|xhigh; flat fallback; unset → user config or model default
   --auto-effort    scale effort to layer width: 1→xhigh, 2+→high (floor) (recommended; overrides --effort)
   --pin-effort E   force ALL agents to effort E (overrides per-call effort)
-  --sandbox S      read-only | workspace-write | danger-full-access  (default workspace-write)
+  --sandbox S      read-only | workspace-write | danger-full-access  (ceiling; default workspace-write)
   --budget N       token ceiling backing budget.total / budget.remaining()
   --budget-meter M what budget.spent() counts: total (default) | output (native pool)
   --plan           dry run: count agents per phase/effort + estimate a --budget (no tokens)
@@ -733,8 +739,9 @@ run-workflow <script.js>
   The *agents* do all file/command I/O (via the Codex sandbox). Don't write a
   script that tries to read files itself — have an `agent()` do it.
 - **Model mapping** — a script that requests `claude-opus-4-8` or a bare
-  `opus`/`sonnet`/`haiku` maps Opus → Sol, Sonnet → Terra, and Haiku → Luna when
-  those GPT-5.6 Codex tiers are available, with an available-model fallback.
+  `opus`/`sonnet`/`haiku` maps Opus → `gpt-6-astra`, Sonnet → `gpt-6.1-sol`, and
+  Haiku → `gpt-6-luna` when available, falling back to the GPT-5.6 tiers (Sol,
+  Terra, Luna) and then any available model.
   Don't rely on that: pin every agent with `--frontier` (or
   `--pin-model gpt-5.6-sol`) — see
   *Model*. (`--model` is only the *fallback* default; a per-call `model` in the

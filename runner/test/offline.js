@@ -7,14 +7,17 @@ import { promisify } from "node:util";
 import { mkdtemp, mkdir, writeFile, readFile, rm, stat, utimes } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { extractMeta, runWorkflowSource } from "../src/runWorkflow.js";
 import { effortForLayerWidth, schemaSkeleton, createRuntime, __activeSlots } from "../src/runtime.js";
 import { isGitRepo, createWorktree } from "../src/worktree.js";
 import { identityHash, Journal } from "../src/journal.js";
 import { liveState, buildRunModel, locateRun, listJournals } from "../src/runModel.js";
-import { resolveModel, pickFrontier } from "../src/modelMap.js";
+import { resolveModel, pickFrontier, chooseModel } from "../src/modelMap.js";
 import { loadAgentType } from "../src/agentTypes.js";
+import { RoleConfigError, resolveSandbox, stricterSandbox, validateRolesFile } from "../src/roles.js";
+import { buildThreadParams } from "../src/codexAgent.js";
 import { isRetryable, strictifySchema } from "../src/codexAgent.js";
 import { recordTokenUsage, resetMeter, tokensSpent, outputSpent, tokensForThread, markResumedThread } from "../src/meter.js";
 import { versionDriftNote, VERIFIED_CODEX_VERSION } from "../src/codexVersion.js";
@@ -144,12 +147,28 @@ const exec = promisify(execFile);
   assert.equal(resolveModel("sonnet", have), "gpt-5.6-terra", "sonnet -> Terra");
   assert.equal(resolveModel("haiku", have), "gpt-5.6-luna", "haiku -> Luna");
   assert.equal(resolveModel("gpt-5.6", have), "gpt-5.6-sol", "family alias -> explicit App Server id");
+  // chooseModel: the requested-model rule shared by the runtime, agent() and sessions.
+  const m = { callModel: "gpt-5.4", roleModel: "haiku", defaultModel: "gpt-5.2" };
+  assert.equal(chooseModel(m), "gpt-5.4", "no pin/frontier: per-call model first");
+  assert.equal(chooseModel({ ...m, callModel: undefined }), "haiku", "then the role model");
+  assert.equal(chooseModel({ defaultModel: "gpt-5.2" }), "gpt-5.2", "then --model");
+  assert.equal(chooseModel({ ...m, frontierModel: "gpt-6-sol" }), "haiku", "--frontier yields to the role model");
+  assert.equal(chooseModel({ ...m, roleModel: undefined, frontierModel: "gpt-6-sol" }), "gpt-6-sol", "--frontier overrides per-call model");
+  assert.equal(chooseModel({ ...m, frontierModel: "gpt-6-sol", pinnedModel: "gpt-6-astra" }), "gpt-6-astra", "--pin-model wins over all");
   assert.equal(resolveModel("gpt-5.4", have), "gpt-5.4", "available id passes through");
   assert.equal(resolveModel("inherit", have), undefined, "inherit -> config default");
   assert.equal(resolveModel(undefined, have), undefined, "undefined -> config default");
   assert.equal(resolveModel("made-up-model", have), undefined, "unknown -> config default");
-  assert.equal(resolveModel("claude-opus", []), "gpt-5.6-sol", "claude maps even with empty model list");
+  assert.equal(resolveModel("claude-opus", []), "gpt-6-astra", "claude maps even with empty model list");
   assert.equal(resolveModel("gpt-5.6", []), "gpt-5.6-sol", "family alias maps even with empty model list");
+
+  const gpt6 = ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", ...have];
+  assert.equal(resolveModel("claude-opus-4-8", gpt6), "gpt-6-astra", "opus -> GPT-6 Astra");
+  assert.equal(resolveModel("sonnet", gpt6), "gpt-6.1-sol", "sonnet -> GPT-6.1 Sol");
+  assert.equal(resolveModel("haiku", gpt6), "gpt-6-luna", "haiku -> GPT-6 Luna");
+  assert.equal(resolveModel("sonnet", []), "gpt-6.1-sol", "sonnet top preference with empty model list");
+  assert.equal(resolveModel("haiku", []), "gpt-6-luna", "haiku top preference with empty model list");
+  assert.equal(resolveModel("gpt-6-luna", gpt6), "gpt-6-luna", "explicit GPT-6 id passes through");
 
   const legacy = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex"];
   assert.equal(resolveModel("opus", legacy), "gpt-5.5", "older catalogs retain the Opus fallback");
@@ -170,6 +189,283 @@ const exec = promisify(execFile);
   assert.match(def.systemPrompt, /exactly one lowercase word/);
   assert.equal(await loadAgentType("does-not-exist", root), null, "unknown agentType -> null");
   await rm(root, { recursive: true, force: true });
+}
+
+// 9b) team roles: the bundled .claude/agents definitions. An empty home keeps the
+//     developer's own ~/.claude and ~/.config out of the result.
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+{
+  const home = await mkdtemp(join(tmpdir(), "wf-home-"));
+  const scout = await loadAgentType("scout", REPO_ROOT, { home });
+  assert.equal(scout.harness, "codex");
+  assert.equal(scout.sandbox, undefined, "bundled roles leave the sandbox to the runner");
+  assert.equal(scout.effort, "medium");
+  assert.match(scout.systemPrompt, /You are scout/);
+  assert.equal(scout.source, join(REPO_ROOT, ".claude", "agents", "scout.md"));
+  const librarian = await loadAgentType("librarian", REPO_ROOT, { home });
+  assert.equal(librarian.sandbox, undefined);
+  const fixer = await loadAgentType("fixer", REPO_ROOT, { home });
+  assert.equal(fixer.sandbox, undefined);
+  assert.equal(fixer.effort, "high");
+  for (const name of ["oracle", "designer"]) {
+    const def = await loadAgentType(name, REPO_ROOT, { home });
+    assert.equal(def.harness, "claude", `${name} is a Claude role`);
+    assert.equal(def.model, "opus");
+  }
+  // The committed example parses and, like the frontmatter, sets no sandbox.
+  const example = validateRolesFile(
+    JSON.parse(await readFile(join(REPO_ROOT, "examples", "roles.example.json"), "utf8")),
+    "roles.example.json",
+  );
+  for (const name of ["scout", "librarian", "fixer"]) assert.equal(example[name].sandbox, undefined);
+  assert.equal(example.fixer.model, "gpt-6.1-sol");
+  assert.equal(example.oracle.harness, "claude");
+  // The global default sandbox is unchanged for agents without a role.
+  assert.equal(buildThreadParams({ cwd: "/x" }).sandbox, "workspace-write");
+  // networkAccess overrides the Codex config for workspace-write; unset leaves it alone.
+  assert.equal(buildThreadParams({ cwd: "/x" }).config, undefined);
+  assert.deepEqual(buildThreadParams({ cwd: "/x", networkAccess: true }).config, { sandbox_workspace_write: { network_access: true } });
+  assert.deepEqual(buildThreadParams({ cwd: "/x", networkAccess: false }).config, { sandbox_workspace_write: { network_access: false } });
+  await rm(home, { recursive: true, force: true });
+}
+
+// Helpers for the roles.json scenarios: a temp project and an empty home.
+async function roleFixture({ agents = {}, project, user } = {}) {
+  const root = await mkdtemp(join(tmpdir(), "wf-roles-"));
+  const cwd = join(root, "proj", "sub"); // walk-up must find the project files
+  const home = join(root, "home");
+  await mkdir(cwd, { recursive: true });
+  await mkdir(home, { recursive: true });
+  if (Object.keys(agents).length) await mkdir(join(root, "proj", ".claude", "agents"), { recursive: true });
+  for (const [name, text] of Object.entries(agents)) {
+    await writeFile(join(root, "proj", ".claude", "agents", `${name}.md`), text);
+  }
+  const write = async (dir, data) => {
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, "roles.json");
+    await writeFile(path, typeof data === "string" ? data : JSON.stringify(data));
+    return path;
+  };
+  const projectPath = project ? await write(join(root, "proj", ".codex-workflows"), project) : null;
+  const userPath = user ? await write(join(home, ".config", "codex-workflows"), user) : null;
+  return { root, cwd, home, projectPath, userPath };
+}
+const SCOUT_MD = "---\nname: scout\nharness: codex\nmodel: haiku\neffort: medium\nsandbox: read-only\n---\nScout prompt.\n";
+
+// 9c) roles.json: only frontmatter, only JSON, both; project over user.
+{
+  // only frontmatter
+  let fx = await roleFixture({ agents: { scout: SCOUT_MD } });
+  let def = await loadAgentType("scout", fx.cwd, { home: fx.home });
+  assert.deepEqual(
+    { model: def.model, effort: def.effort, sandbox: def.sandbox, harness: def.harness },
+    { model: "haiku", effort: "medium", sandbox: "read-only", harness: "codex" },
+    "frontmatter alone drives the role",
+  );
+  await rm(fx.root, { recursive: true, force: true });
+
+  // only JSON (no definition file): settings apply, default instructions
+  fx = await roleFixture({ project: { roles: { scout: { model: "gpt-6-luna", sandbox: "read-only" } } } });
+  def = await loadAgentType("scout", fx.cwd, { home: fx.home });
+  assert.equal(def.model, "gpt-6-luna");
+  assert.equal(def.sandbox, "read-only");
+  assert.equal(def.systemPrompt, undefined, "no definition -> no system prompt");
+  assert.equal(def.sources.model, fx.projectPath);
+  assert.equal(await loadAgentType("fixer", fx.cwd, { home: fx.home }), null, "role in neither place -> null");
+  await rm(fx.root, { recursive: true, force: true });
+
+  // both: JSON overrides field by field, frontmatter fills the rest
+  fx = await roleFixture({
+    agents: { scout: SCOUT_MD },
+    project: { roles: { scout: { model: "gpt-6-luna", effort: "low" } } },
+  });
+  def = await loadAgentType("scout", fx.cwd, { home: fx.home });
+  assert.equal(def.model, "gpt-6-luna", "JSON model over frontmatter");
+  assert.equal(def.effort, "low", "JSON effort over frontmatter");
+  assert.equal(def.sandbox, "read-only", "frontmatter sandbox kept");
+  assert.match(def.systemPrompt, /Scout prompt/);
+  await rm(fx.root, { recursive: true, force: true });
+
+  // project over user, per field
+  fx = await roleFixture({
+    agents: { scout: SCOUT_MD },
+    user: { roles: { scout: { model: "gpt-5.6-luna", effort: "minimal" }, fixer: { effort: "xhigh" } } },
+    project: { roles: { scout: { model: "gpt-6-luna" } } },
+  });
+  def = await loadAgentType("scout", fx.cwd, { home: fx.home });
+  assert.equal(def.model, "gpt-6-luna", "project model wins");
+  assert.equal(def.effort, "minimal", "user field kept where the project is silent");
+  assert.equal(def.sources.model, fx.projectPath);
+  assert.equal(def.sources.effort, fx.userPath);
+  const userOnly = await loadAgentType("fixer", fx.cwd, { home: fx.home });
+  assert.equal(userOnly.effort, "xhigh", "user-only role applies");
+  await rm(fx.root, { recursive: true, force: true });
+}
+
+// 9d) roles.json and frontmatter schema errors name the file and the field.
+{
+  const expectError = async (setup, name, field) => {
+    const fx = await roleFixture(setup);
+    await assert.rejects(
+      loadAgentType(name, fx.cwd, { home: fx.home }),
+      (e) => {
+        assert.ok(e instanceof RoleConfigError, `RoleConfigError for ${field}`);
+        assert.equal(e.field, field);
+        assert.ok(e.message.includes(e.path) && e.message.includes(field), e.message);
+        assert.ok(e.path === fx.projectPath || e.path === fx.userPath || e.path.endsWith(`${name}.md`), e.path);
+        return true;
+      },
+    );
+    await rm(fx.root, { recursive: true, force: true });
+  };
+  await expectError({ project: { roles: { scout: { sanbox: "read-only" } } } }, "scout", "roles.scout.sanbox");
+  await expectError({ project: { roles: { scout: { sandbox: "danger-full-access" } } } }, "scout", "roles.scout.sandbox");
+  await expectError({ user: { roles: { fixer: { sandbox: "dangerFullAccess" } } } }, "fixer", "roles.fixer.sandbox");
+  await expectError({ project: { roles: { scout: { harness: "gemini" } } } }, "scout", "roles.scout.harness");
+  await expectError({ project: { roles: { scout: { effort: "max" } } } }, "scout", "roles.scout.effort");
+  await expectError({ project: { roles: { scout: { model: 5 } } } }, "scout", "roles.scout.model");
+  await expectError({ project: { agents: {} } }, "scout", "agents");
+  await expectError({ project: { roles: [] } }, "scout", "roles");
+  await expectError({ project: "{ not json" }, "scout", "(root)");
+  // A bad file fails the load even for a role it does not mention.
+  await expectError({ user: { roles: { other: { sandbox: "nope" } } } }, "scout", "roles.other.sandbox");
+  await expectError(
+    { agents: { scout: "---\nname: scout\nsandbox: danger-full-access\n---\nx\n" } },
+    "scout",
+    "frontmatter.sandbox",
+  );
+  await expectError({ agents: { scout: "---\nname: scout\nharness: gpt\n---\nx\n" } }, "scout", "frontmatter.harness");
+  // Unknown frontmatter keys (Claude Code's tools, color, …) are not errors, and a
+  // Claude-only effort is left to Claude Code.
+  const fx = await roleFixture({ agents: { a: "---\nname: a\ntools: Read\ncolor: red\neffort: max\n---\nx\n" } });
+  const def = await loadAgentType("a", fx.cwd, { home: fx.home });
+  assert.equal(def.effort, undefined);
+  await rm(fx.root, { recursive: true, force: true });
+}
+
+// 9e) the runtime: sandbox, effort and model per role, Claude roles refused.
+{
+  const home = await mkdtemp(join(tmpdir(), "wf-home-"));
+  const loadRole = (name) => loadAgentType(name, REPO_ROOT, { home });
+  const echo = async (_p, o) => ({ sandbox: o.sandbox ?? null, effort: o.effort ?? null });
+  const run = (body, extra = {}) =>
+    runWorkflowSource(`export const meta = { name: "roles" };\n${body}`, { runAgent: echo, loadRole, ...extra });
+
+  const r = await run(`return await parallel([
+    () => agent("a", { agentType: "scout" }),
+    () => agent("b", { agentType: "librarian" }),
+    () => agent("c", { agentType: "fixer" }),
+    () => agent("d"),
+  ]);`);
+  assert.deepEqual(r[0], { sandbox: null, effort: "medium" }, "scout: no role sandbox");
+  assert.deepEqual(r[1], { sandbox: null, effort: "medium" }, "librarian: no role sandbox");
+  assert.deepEqual(r[2], { sandbox: null, effort: "high" }, "fixer: no role sandbox");
+  assert.deepEqual(r[3], { sandbox: null, effort: null }, "no role -> runner defaults untouched");
+
+  // Role over runner defaults (--sandbox/--effort/--auto-effort); agent() options over the role.
+  const d = await run(`return await parallel([
+    () => agent("a", { agentType: "scout" }),
+    () => agent("b", { agentType: "scout", sandbox: "workspace-write", effort: "low" }),
+    () => agent("c"),
+  ]);`, { defaults: { sandbox: "danger-full-access", effort: "xhigh" }, autoEffort: true });
+  assert.deepEqual(d[0], { sandbox: "danger-full-access", effort: "medium" }, "role effort beats --effort and --auto-effort; --sandbox applies");
+  assert.deepEqual(d[1], { sandbox: "workspace-write", effort: "low" }, "per-call options beat the role");
+  assert.deepEqual(d[2], { sandbox: "danger-full-access", effort: "high" }, "non-role agents keep the runner defaults");
+  // --sandbox caps both the role's and the per-call sandbox; per-call beats the role.
+  const sandboxFor = async (roleSandbox, cliSandbox, callSandbox) => {
+    const call = callSandbox ? `, sandbox: "${callSandbox}"` : "";
+    const res = await run(`return await agent("a", { agentType: "r"${call} });`, {
+      defaults: cliSandbox ? { sandbox: cliSandbox } : {},
+      loadRole: async () => ({ sandbox: roleSandbox, sources: {} }),
+    });
+    return res.sandbox;
+  };
+  assert.equal(await sandboxFor("workspace-write", "read-only"), "read-only", "--sandbox read-only caps a writing role");
+  assert.equal(await sandboxFor("read-only", "danger-full-access"), "read-only", "a read-only role narrows a wider --sandbox");
+  assert.equal(await sandboxFor("workspace-write", "dangerFullAccess"), "workspace-write", "camelCase --sandbox is ranked too");
+  assert.equal(await sandboxFor("read-only", undefined), "read-only", "role sandbox applies without --sandbox");
+  assert.equal(await sandboxFor("read-only", "read-only", "workspace-write"), "read-only", "--sandbox caps a per-call sandbox too");
+  assert.equal(await sandboxFor("read-only", undefined, "workspace-write"), "workspace-write", "per-call sandbox beats the role");
+  assert.equal(await sandboxFor("workspace-write", "danger-full-access", "read-only"), "read-only", "a stricter per-call sandbox stands");
+  assert.equal(await sandboxFor(undefined, undefined, "danger-full-access"), "workspace-write", "without --sandbox the cap is workspace-write");
+  assert.equal(await sandboxFor(undefined, "danger-full-access", "danger-full-access"), "danger-full-access", "an explicit --sandbox lifts the cap");
+  assert.equal(await sandboxFor(undefined, undefined, undefined), null, "nothing requested leaves the sandbox to Codex");
+  assert.equal(stricterSandbox(undefined, undefined), undefined);
+  // The helper codexAgent/codexSession use for direct callers (sandboxCap).
+  assert.equal(resolveSandbox({ cap: "read-only", call: "danger-full-access" }), "read-only");
+  assert.equal(resolveSandbox({ call: "workspace-write", role: "read-only" }), "workspace-write");
+  assert.equal(resolveSandbox({ role: "read-only" }), "read-only");
+  assert.equal(resolveSandbox({}), undefined);
+  assert.equal(resolveSandbox({ call: "danger-full-access" }), "workspace-write", "default cap without --sandbox");
+  assert.equal(resolveSandbox({ cap: "danger-full-access", call: "danger-full-access" }), "danger-full-access");
+  // The runtime hands networkAccess (--no-network) to every agent unchanged.
+  for (const networkAccess of [true, false, undefined]) {
+    const seen = await runWorkflowSource('export const meta = { name: "net" };\nreturn await agent("a");', {
+      runAgent: async (_p, o) => o.networkAccess, networkAccess,
+    });
+    assert.equal(seen, networkAccess, `networkAccess ${networkAccess} reaches the agent`);
+  }
+  const pinned = await run('return await agent("a", { agentType: "scout" });', { pinnedEffort: "xhigh" });
+  assert.equal(pinned.effort, "xhigh", "--pin-effort stays authoritative");
+
+  // Model: agent() > role > --model; --pin-model over all. Read from the start event.
+  const models = async (body, extra) => {
+    const ev = [];
+    await run(body, { onEvent: (e) => e.type === "start" && ev.push(e.model), ...extra });
+    return ev;
+  };
+  assert.deepEqual(
+    await models('await agent("a", { agentType: "scout" }); await agent("b", { agentType: "scout", model: "gpt-5.5" }); await agent("c");', { defaultModel: "gpt-5.4" }),
+    ["haiku", "gpt-5.5", "gpt-5.4"],
+    "role model over --model, per-call model over role",
+  );
+  assert.deepEqual(
+    await models('await agent("a", { agentType: "scout" });', { pinnedModel: "gpt-6-astra" }),
+    ["gpt-6-astra"],
+    "--pin-model over role",
+  );
+  // --frontier: a role keeps its model; per-call and role-less agents get the frontier.
+  assert.deepEqual(
+    await models('await agent("a", { agentType: "scout" }); await agent("b", { model: "gpt-5.4" }); await agent("c");', { frontierModel: "gpt-6-sol", defaultModel: "gpt-5.2" }),
+    ["haiku", "gpt-6-sol", "gpt-6-sol"],
+    "--frontier yields to the role model, overrides per-call and --model",
+  );
+  assert.deepEqual(
+    await models('await agent("a", { agentType: "scout" });', { pinnedModel: "gpt-6-astra", frontierModel: "gpt-6-sol" }),
+    ["gpt-6-astra"],
+    "--pin-model beats --frontier and the role",
+  );
+
+  // Claude roles are refused, in --plan too, with a pointer to the Agent tool.
+  for (const extra of [{}, { plan: true }]) {
+    await assert.rejects(
+      run('return await agent("review", { agentType: "oracle" });', extra),
+      (e) => e.code === "CLAUDE_ROLE" && /native Agent tool/.test(e.message) && /oracle\.md/.test(e.message),
+    );
+  }
+  let calls = 0;
+  await assert.rejects(
+    run('return await agent("ui", { agentType: "designer" });', { runAgent: async () => calls++ }),
+    /Claude role/,
+  );
+  assert.equal(calls, 0, "a refused role never reaches Codex");
+  await assert.rejects(
+    run('const s = await agent.start("x", { agentType: "oracle" }); return s.id;', { startSession: async () => { throw new Error("must not start"); } }),
+    /Claude role/,
+    "sessions refuse Claude roles too",
+  );
+  await rm(home, { recursive: true, force: true });
+
+  // harness: claude from roles.json alone (the frontmatter says codex).
+  const fx = await roleFixture({ agents: { scout: SCOUT_MD }, project: { roles: { scout: { harness: "claude" } } } });
+  await assert.rejects(
+    runWorkflowSource('export const meta = { name: "r" }; return await agent("x", { agentType: "scout" });', {
+      runAgent: echo,
+      loadRole: (name) => loadAgentType(name, fx.cwd, { home: fx.home }),
+    }),
+    (e) => e.code === "CLAUDE_ROLE" && e.message.includes(fx.projectPath),
+  );
+  await rm(fx.root, { recursive: true, force: true });
 }
 
 // 10) retry classification: transient -> retry; permanent -> no retry.

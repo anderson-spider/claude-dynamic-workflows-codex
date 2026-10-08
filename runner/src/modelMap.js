@@ -8,11 +8,12 @@ export function modelId(m) {
   return null;
 }
 
-// Claude tier -> ordered Codex preferences (first available wins).
+// Claude tier -> ordered Codex preferences (first available wins). The GPT-6
+// ids lead; the older ones stay as fallbacks for catalogs that lack them.
 const FAMILY_PREFERENCES = {
-  opus: ["gpt-5.6-sol", "gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.2"],
-  sonnet: ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.4", "gpt-5.5", "gpt-5.3-codex", "gpt-5.4-mini"],
-  haiku: ["gpt-5.6-luna", "gpt-5.4-mini", "gpt-5.6-terra", "gpt-5.4", "gpt-5.2"],
+  opus: ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.5", "gpt-5.4", "gpt-5.3-codex", "gpt-5.2"],
+  sonnet: ["gpt-6.1-sol", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.4", "gpt-5.5", "gpt-5.3-codex", "gpt-5.4-mini"],
+  haiku: ["gpt-6-luna", "gpt-5.6-luna", "gpt-5.4-mini", "gpt-5.6-terra", "gpt-5.4", "gpt-5.2"],
 };
 
 // The API's family alias is not necessarily listed by Codex model/list. Resolve
@@ -28,6 +29,21 @@ function claudeFamily(id) {
   if (/sonnet/.test(s)) return "sonnet";
   if (/haiku/.test(s)) return "haiku";
   return null;
+}
+
+/**
+ * Pick the model an agent requests, before Codex-catalog resolution. One place,
+ * shared by the runtime (journal identity, events) and the agent/session drivers.
+ *   --pin-model                -> always the pin
+ *   --frontier                 -> the role's model if the agentType sets one, else
+ *                                 the frontier (a script's per-call `model` is still
+ *                                 overridden, so stale ids in authored scripts lose)
+ *   neither                    -> per-call model > role model > --model default
+ */
+export function chooseModel({ pinnedModel, frontierModel, callModel, roleModel, defaultModel } = {}) {
+  if (pinnedModel) return pinnedModel;
+  if (frontierModel) return roleModel ?? frontierModel;
+  return callModel ?? roleModel ?? defaultModel;
 }
 
 /**
