@@ -16,7 +16,7 @@ import { identityHash, Journal } from "../src/journal.js";
 import { liveState, buildRunModel, locateRun, listJournals } from "../src/runModel.js";
 import { resolveModel, pickFrontier, chooseModel } from "../src/modelMap.js";
 import { loadAgentType } from "../src/agentTypes.js";
-import { RoleConfigError, validateRolesFile } from "../src/roles.js";
+import { RoleConfigError, stricterSandbox, validateRolesFile } from "../src/roles.js";
 import { buildThreadParams } from "../src/codexAgent.js";
 import { isRetryable, strictifySchema } from "../src/codexAgent.js";
 import { recordTokenUsage, resetMeter, tokensSpent, outputSpent, tokensForThread, markResumedThread } from "../src/meter.js";
@@ -367,12 +367,21 @@ const SCOUT_MD = "---\nname: scout\nharness: codex\nmodel: haiku\neffort: medium
   assert.deepEqual(d[0], { sandbox: "danger-full-access", effort: "medium" }, "role effort beats --effort and --auto-effort; --sandbox applies");
   assert.deepEqual(d[1], { sandbox: "workspace-write", effort: "low" }, "per-call options beat the role");
   assert.deepEqual(d[2], { sandbox: "danger-full-access", effort: "high" }, "non-role agents keep the runner defaults");
-  // A role that does set a sandbox still beats --sandbox; agent() still beats the role.
-  const sb = await run(`return await parallel([
-    () => agent("a", { agentType: "ro" }),
-    () => agent("b", { agentType: "ro", sandbox: "workspace-write" }),
-  ]);`, { defaults: { sandbox: "danger-full-access" }, loadRole: async () => ({ sandbox: "read-only", sources: {} }) });
-  assert.deepEqual(sb.map((x) => x.sandbox), ["read-only", "workspace-write"], "role sandbox over --sandbox, per-call over role");
+  // A role sandbox and --sandbox: the stricter wins; agent() still beats both.
+  const sandboxFor = async (roleSandbox, cliSandbox, callSandbox) => {
+    const call = callSandbox ? `, sandbox: "${callSandbox}"` : "";
+    const res = await run(`return await agent("a", { agentType: "r"${call} });`, {
+      defaults: cliSandbox ? { sandbox: cliSandbox } : {},
+      loadRole: async () => ({ sandbox: roleSandbox, sources: {} }),
+    });
+    return res.sandbox;
+  };
+  assert.equal(await sandboxFor("workspace-write", "read-only"), "read-only", "--sandbox read-only caps a writing role");
+  assert.equal(await sandboxFor("read-only", "danger-full-access"), "read-only", "a read-only role narrows a wider --sandbox");
+  assert.equal(await sandboxFor("workspace-write", "dangerFullAccess"), "workspace-write", "camelCase --sandbox is ranked too");
+  assert.equal(await sandboxFor("read-only", undefined), "read-only", "role sandbox applies without --sandbox");
+  assert.equal(await sandboxFor("read-only", "read-only", "workspace-write"), "workspace-write", "per-call sandbox beats both");
+  assert.equal(stricterSandbox(undefined, undefined), undefined);
   const pinned = await run('return await agent("a", { agentType: "scout" });', { pinnedEffort: "xhigh" });
   assert.equal(pinned.effort, "xhigh", "--pin-effort stays authoritative");
 

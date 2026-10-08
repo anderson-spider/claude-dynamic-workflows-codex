@@ -78,7 +78,8 @@ caminho do arquivo e o campo.
 
 **Precedência** (da maior para a menor): opções passadas no `agent()` >
 `roles.json` (projeto > usuário) > frontmatter do papel > padrões do runner
-(`--sandbox`, `--effort`, `--auto-effort`, `--model` e o padrão do Codex).
+(`--effort`, `--auto-effort`, `--model` e o padrão do Codex). O sandbox tem regra
+própria, descrita abaixo.
 `--pin-model` e `--pin-effort` continuam acima de tudo. O `--frontier` (que o skill
 sempre passa) substitui o `model` escrito no script, mas **não** o modelo do papel:
 scout, librarian e fixer mantêm o próprio modelo, e só agentes sem modelo de papel
@@ -86,8 +87,10 @@ rodam no frontier.
 
 **Sandbox.** Os papéis incluídos não definem `sandbox`: scout, librarian e fixer
 rodam com o sandbox do `agent()` ou do `--sandbox` (padrão `workspace-write`). Um
-`sandbox` no `roles.json` ou no frontmatter continua aceito e fica acima do
-`--sandbox`.
+`sandbox` no `roles.json` ou no frontmatter continua aceito, mas o `--sandbox`
+funciona como teto: vale o mais restritivo dos dois (`read-only` <
+`workspace-write` < `danger-full-access`). Um papel pode restringir o `--sandbox`,
+nunca ampliar. O `sandbox` passado no `agent()` vence os dois.
 
 **Workflow mínimo** (uma chamada, para medir latência):
 

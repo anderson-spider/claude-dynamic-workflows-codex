@@ -17,6 +17,21 @@ export const HARNESSES = new Set(["codex", "claude"]);
 export const ROLE_SANDBOXES = new Set(["read-only", "workspace-write"]);
 export const EFFORTS = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
 const ROLE_FIELDS = new Set(["harness", "model", "effort", "sandbox"]);
+
+// Sandboxes from most to least restrictive, in both spellings Codex accepts.
+const SANDBOX_RANK = {
+  "read-only": 0, readOnly: 0,
+  "workspace-write": 1, workspaceWrite: 1,
+  "danger-full-access": 2, dangerFullAccess: 2,
+};
+
+// The more restrictive of two sandboxes; either may be unset. Used to cap a
+// role's sandbox by --sandbox, so a role file never widens the CLI choice.
+export function stricterSandbox(a, b) {
+  if (a == null) return b;
+  if (b == null) return a;
+  return (SANDBOX_RANK[b] ?? Infinity) < (SANDBOX_RANK[a] ?? Infinity) ? b : a;
+}
 const TOP_LEVEL_FIELDS = new Set(["$schema", "roles"]);
 
 export class RoleConfigError extends Error {
