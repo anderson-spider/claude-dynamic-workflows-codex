@@ -32,10 +32,18 @@ export function stricterSandbox(a, b) {
   return (SANDBOX_RANK[b] ?? Infinity) < (SANDBOX_RANK[a] ?? Infinity) ? b : a;
 }
 
+// The ceiling when no --sandbox is given: a script or role may narrow it, and
+// only an explicit --sandbox danger-full-access lets an agent leave it.
+export const DEFAULT_SANDBOX_CAP = "workspace-write";
+
 // The sandbox an agent runs with: the per-call value, else the role's, capped
-// by `cap` (--sandbox). Neither a script nor a role file can widen the cap.
+// by `cap` (--sandbox, else DEFAULT_SANDBOX_CAP). Neither a script nor a role
+// file can widen it. With nothing requested it is `cap` itself (undefined
+// leaves the choice to Codex, which defaults to workspace-write).
 export function resolveSandbox({ cap, call, role } = {}) {
-  return stricterSandbox(cap, call ?? role);
+  const requested = call ?? role;
+  if (requested == null) return cap;
+  return stricterSandbox(cap ?? DEFAULT_SANDBOX_CAP, requested);
 }
 const TOP_LEVEL_FIELDS = new Set(["$schema", "roles"]);
 

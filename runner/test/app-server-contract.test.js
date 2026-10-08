@@ -97,6 +97,7 @@ try {
     effort: "low",
     sandbox: "workspace-write",
     sandboxCap: "read-only", // --sandbox for a direct caller: caps the per-call sandbox
+    networkAccess: true,
     cwd: ROOT,
     retries: 0,
     schema: { type: "object", properties: { answer: { type: "string" } } },
@@ -129,6 +130,7 @@ try {
   const threadStart = clientFrames.find((frame) => frame.method === "thread/start");
   assert.equal(threadStart.params.approvalPolicy, "never");
   assert.equal(threadStart.params.sandbox, "read-only", "sandboxCap narrows the per-call sandbox");
+  assert.deepEqual(threadStart.params.config, { sandbox_workspace_write: { network_access: true } });
   assert.equal(threadStart.params.cwd, ROOT);
   assert.equal(threadStart.params.model, "gpt-5.5");
 

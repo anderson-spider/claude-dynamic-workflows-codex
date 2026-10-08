@@ -222,6 +222,10 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
   assert.equal(example.oracle.harness, "claude");
   // The global default sandbox is unchanged for agents without a role.
   assert.equal(buildThreadParams({ cwd: "/x" }).sandbox, "workspace-write");
+  // networkAccess overrides the Codex config for workspace-write; unset leaves it alone.
+  assert.equal(buildThreadParams({ cwd: "/x" }).config, undefined);
+  assert.deepEqual(buildThreadParams({ cwd: "/x", networkAccess: true }).config, { sandbox_workspace_write: { network_access: true } });
+  assert.deepEqual(buildThreadParams({ cwd: "/x", networkAccess: false }).config, { sandbox_workspace_write: { network_access: false } });
   await rm(home, { recursive: true, force: true });
 }
 
@@ -383,12 +387,24 @@ const SCOUT_MD = "---\nname: scout\nharness: codex\nmodel: haiku\neffort: medium
   assert.equal(await sandboxFor("read-only", "read-only", "workspace-write"), "read-only", "--sandbox caps a per-call sandbox too");
   assert.equal(await sandboxFor("read-only", undefined, "workspace-write"), "workspace-write", "per-call sandbox beats the role");
   assert.equal(await sandboxFor("workspace-write", "danger-full-access", "read-only"), "read-only", "a stricter per-call sandbox stands");
+  assert.equal(await sandboxFor(undefined, undefined, "danger-full-access"), "workspace-write", "without --sandbox the cap is workspace-write");
+  assert.equal(await sandboxFor(undefined, "danger-full-access", "danger-full-access"), "danger-full-access", "an explicit --sandbox lifts the cap");
+  assert.equal(await sandboxFor(undefined, undefined, undefined), null, "nothing requested leaves the sandbox to Codex");
   assert.equal(stricterSandbox(undefined, undefined), undefined);
   // The helper codexAgent/codexSession use for direct callers (sandboxCap).
   assert.equal(resolveSandbox({ cap: "read-only", call: "danger-full-access" }), "read-only");
   assert.equal(resolveSandbox({ call: "workspace-write", role: "read-only" }), "workspace-write");
   assert.equal(resolveSandbox({ role: "read-only" }), "read-only");
   assert.equal(resolveSandbox({}), undefined);
+  assert.equal(resolveSandbox({ call: "danger-full-access" }), "workspace-write", "default cap without --sandbox");
+  assert.equal(resolveSandbox({ cap: "danger-full-access", call: "danger-full-access" }), "danger-full-access");
+  // The runtime hands networkAccess (--no-network) to every agent unchanged.
+  for (const networkAccess of [true, false, undefined]) {
+    const seen = await runWorkflowSource('export const meta = { name: "net" };\nreturn await agent("a");', {
+      runAgent: async (_p, o) => o.networkAccess, networkAccess,
+    });
+    assert.equal(seen, networkAccess, `networkAccess ${networkAccess} reaches the agent`);
+  }
   const pinned = await run('return await agent("a", { agentType: "scout" });', { pinnedEffort: "xhigh" });
   assert.equal(pinned.effort, "xhigh", "--pin-effort stays authoritative");
 

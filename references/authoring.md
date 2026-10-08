@@ -68,7 +68,7 @@ The only global that calls a model. Runs `prompt` as one Codex thread+turn.
 | `agentType` | name of a subagent in `.claude/agents/<name>.md`; its body becomes the system prompt, its frontmatter `model` a fallback |
 | `systemPrompt` | explicit developer instructions (overrides `agentType` body) |
 | `effort` | `none`/`minimal`/`low`/`medium`/`high`/`xhigh`. **Usually leave unset and run with `--auto-effort`**, which scales effort to each layer's parallel width (1→`xhigh`, 2+→`high` — the floor) so lone gate agents get the policy's extra-high tier while every fan-out still gets `high`. A per-call `effort` *overrides* the policy, so set it only as a deliberate exception. Precedence: `--pin-effort` > per-call `effort` > `--auto-effort` > `--effort` > inherited user config or model default. With no explicit `model_reasoning_effort`, GPT-5.6 Sol's catalog default is `low`; unspecified effort is not universally `xhigh`. |
-| `sandbox` | `read-only` \| `workspace-write` \| `danger-full-access` (default `workspace-write`). Capped by the CLI `--sandbox`: a wider value is narrowed to it |
+| `sandbox` | `read-only` \| `workspace-write` \| `danger-full-access` (default `workspace-write`). Capped by the CLI `--sandbox` (default cap `workspace-write`): a wider value is narrowed to it. `workspace-write` has network access unless the run passes `--no-network` |
 | `isolation` | `'worktree'` → run in a detached git worktree at HEAD (parallel file-editing agents don't collide); kept if it leaves changes |
 | `cwd` | working directory for the thread (default the runner's cwd) |
 | `personality` | `none` \| `friendly` \| `pragmatic` |

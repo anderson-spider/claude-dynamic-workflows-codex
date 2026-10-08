@@ -3,7 +3,7 @@
 //
 //   run-workflow <script.js> [--args JSON] [--args-file path]
 //                [--budget N] [--model M] [--effort low|medium|high|...]
-//                [--sandbox read-only|workspace-write|danger-full-access]
+//                [--sandbox read-only|workspace-write|danger-full-access] [--no-network]
 //
 // Progress is written to stderr; the workflow's return value is printed as JSON
 // to stdout, so you can pipe it:  run-workflow wf.js | jq .
@@ -31,6 +31,7 @@ function parseArgs(argv) {
     pinModel: null,
     frontier: false,
     sandbox: null,
+    network: true,
     effort: null,
     autoEffort: false,
     pinEffort: null,
@@ -60,6 +61,7 @@ function parseArgs(argv) {
     else if (a === "--pin-model") out.pinModel = rest[++i];
     else if (a === "--frontier") out.frontier = true;
     else if (a === "--sandbox") out.sandbox = rest[++i];
+    else if (a === "--no-network") out.network = false;
     else if (a === "--effort") out.effort = rest[++i];
     else if (a === "--auto-effort") out.autoEffort = true;
     else if (a === "--pin-effort") out.pinEffort = rest[++i];
@@ -91,7 +93,7 @@ if (opts.help || !opts.script) {
     "usage: run-workflow <script.js> [--args JSON] [--args-file path]\n" +
       "  [--budget N] [--budget-meter total|output] [--model M] [--frontier | --pin-model M]\n" +
       "  [--effort none|minimal|low|medium|high|xhigh] [--auto-effort | --pin-effort E]\n" +
-      "  [--sandbox read-only|workspace-write|danger-full-access] [--retries N]\n" +
+      "  [--sandbox read-only|workspace-write|danger-full-access] [--no-network] [--retries N]\n" +
       "  [--plan] [--tui] [--gui] [--resume] [--journal PATH] [--run-id NAME] [--fresh] [--no-journal]\n" +
       "  [--summary | --no-summary]\n" +
       "\n" +
@@ -336,6 +338,7 @@ if (!opts.noJournal) {
       autoEffort: opts.autoEffort,
       pinEffort: pinnedEffort,
       sandbox: opts.sandbox ?? null,
+      network: opts.network,
       pid: process.pid,
       startedAt: Date.now(),
       script: resolve(opts.script),
@@ -478,6 +481,7 @@ try {
     defaultModel,
     pinnedModel,
     frontierModel,
+    networkAccess: opts.network,
     autoEffort: opts.autoEffort,
     pinnedEffort,
     onPhase,

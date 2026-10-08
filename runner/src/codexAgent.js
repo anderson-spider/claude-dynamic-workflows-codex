@@ -103,12 +103,15 @@ export function getAvailableModels() {
 
 // Thread-level settings (sandbox, cwd, developer instructions, personality) are
 // fixed for the life of the thread — a follow-up turn cannot change them.
-export function buildThreadParams({ sandbox, cwd, model, systemPrompt, personality }) {
+// `networkAccess` (true/false) overrides the user's Codex config for
+// sandbox_workspace_write.network_access; undefined leaves that config alone.
+export function buildThreadParams({ sandbox, cwd, model, systemPrompt, personality, networkAccess }) {
   const params = {
     approvalPolicy: "never",
     sandbox: SANDBOX_MAP[sandbox] ?? "workspace-write",
     cwd,
   };
+  if (networkAccess != null) params.config = { sandbox_workspace_write: { network_access: !!networkAccess } };
   if (model) params.model = model;
   if (systemPrompt) params.developerInstructions = systemPrompt;
   if (personality) params.personality = personality;
@@ -183,8 +186,8 @@ export async function codexAgent(prompt, opts = {}) {
       log(`agentType '${opts.agentType}' not found — using default instructions`);
     }
   }
-  // `sandboxCap` (--sandbox for direct callers) bounds the sandbox, as in the runtime.
-  if (opts.sandboxCap != null) opts = { ...opts, sandbox: resolveSandbox({ cap: opts.sandboxCap, call: opts.sandbox }) };
+  // `sandboxCap` (--sandbox, else workspace-write) bounds the sandbox, as in the runtime.
+  opts = { ...opts, sandbox: resolveSandbox({ cap: opts.sandboxCap, call: opts.sandbox }) };
   // `pinnedModel` (--pin-model) is authoritative: it overrides a per-call `model`,
   // an agentType model, and the CLI default. `frontierModel` (--frontier) overrides
   // a per-call `model` but yields to the agentType's model (see chooseModel).
@@ -235,6 +238,7 @@ async function runOneTurn(prompt, opts) {
     model,
     systemPrompt: opts.systemPrompt,
     personality: opts.personality,
+    networkAccess: opts.networkAccess,
   });
   const startThreadRes = await client.startThread(threadParams);
   const threadId = startThreadRes?.thread?.id;

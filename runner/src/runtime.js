@@ -149,6 +149,7 @@ export function createRuntime({
   startSession = startCodexSession, // seam: injected in tests for sessionful workers
   humanChannel = null, // interactive involvement: { notify(q), wait(id, {timeoutMs}) -> {answer}|undefined }
   loadRole = loadAgentType, // seam: agentType -> role settings (frontmatter + roles.json)
+  networkAccess, // true/false: workspace-write network for every agent (--no-network); undefined = Codex config
 } = {}) {
   let agentCount = 0;
   let currentPhase = null; // last phase() title; the fallback when opts.phase is unset
@@ -195,8 +196,8 @@ export function createRuntime({
   }
 
   // Per-call options over role settings over runner defaults (--retries etc.).
-  // Sandbox: the per-call value, else the role's, capped by --sandbox, so neither
-  // a script nor a role can widen the CLI sandbox. Effort goes through
+  // Sandbox: the per-call value, else the role's, capped by --sandbox (else
+  // workspace-write), so neither a script nor a role can widen it. Effort goes through
   // resolveEffort and the model through requestedModel, since both have their
   // own pin/flag rules.
   function mergeOpts(opts, role) {
@@ -271,7 +272,7 @@ export function createRuntime({
     let metrics = null;
     const result = await pooled(() =>
       runAgent(prompt, {
-        ...merged, sandboxCap: defaults.sandbox, defaultModel, pinnedModel, frontierModel, log: onLog,
+        ...merged, sandboxCap: defaults.sandbox, networkAccess, defaultModel, pinnedModel, frontierModel, log: onLog,
         onMetrics: (m) => { metrics = m; },
         onProgress: onProgress ? (text) => onProgress(label, text, key) : undefined,
       }),
@@ -652,7 +653,7 @@ export function createRuntime({
 
     let driver;
     try {
-      driver = await startSession({ ...merged, sandboxCap: defaults.sandbox, defaultModel, pinnedModel, frontierModel, log: onLog, resumeThreadId: resumeThreadId ?? undefined });
+      driver = await startSession({ ...merged, sandboxCap: defaults.sandbox, networkAccess, defaultModel, pinnedModel, frontierModel, log: onLog, resumeThreadId: resumeThreadId ?? undefined });
     } catch (e) {
       release();
       throw e;

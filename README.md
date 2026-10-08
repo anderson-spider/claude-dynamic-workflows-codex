@@ -89,8 +89,14 @@ rodam no frontier.
 rodam com o sandbox do `agent()` ou do `--sandbox` (padrão `workspace-write`). Um
 `sandbox` no `roles.json` ou no frontmatter continua aceito. O `sandbox` passado no
 `agent()` vence o do papel, e o `--sandbox` funciona como teto para os dois: vale o
-mais restritivo (`read-only` < `workspace-write` < `danger-full-access`). Script e
-papel podem restringir o `--sandbox`, nunca ampliar.
+mais restritivo (`read-only` < `workspace-write` < `danger-full-access`). Sem
+`--sandbox`, o teto é `workspace-write`; `danger-full-access` só com
+`--sandbox danger-full-access` explícito. Script e papel podem restringir o teto,
+nunca ampliar.
+
+**Rede.** No `workspace-write`, o runner liga o acesso à rede em todos os agentes,
+independente do `sandbox_workspace_write.network_access` do seu config do Codex.
+Use `--no-network` para desligar. O `read-only` continua sem rede.
 
 **Workflow mínimo** (uma chamada, para medir latência):
 

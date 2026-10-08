@@ -63,8 +63,8 @@ export async function startCodexSession(opts = {}) {
       log(`agentType '${opts.agentType}' not found — using default instructions`);
     }
   }
-  // `sandboxCap` (--sandbox for direct callers) bounds the sandbox, as in agent().
-  if (opts.sandboxCap != null) opts = { ...opts, sandbox: resolveSandbox({ cap: opts.sandboxCap, call: opts.sandbox }) };
+  // `sandboxCap` (--sandbox, else workspace-write) bounds the sandbox, as in agent().
+  opts = { ...opts, sandbox: resolveSandbox({ cap: opts.sandboxCap, call: opts.sandbox }) };
   // Same model rule as agent(): --pin-model wins; --frontier yields to the role's model.
   const requestedModel = chooseModel({
     pinnedModel: opts.pinnedModel, frontierModel: opts.frontierModel,
@@ -87,7 +87,7 @@ export async function startCodexSession(opts = {}) {
 
   const client = await getClient(opts.clientOptions); // shared, self-healing singleton
   const model = resolveModel(requestedModel, getAvailableModels(), log);
-  const threadParams = buildThreadParams({ sandbox: opts.sandbox, cwd, model, systemPrompt, personality: opts.personality });
+  const threadParams = buildThreadParams({ sandbox: opts.sandbox, cwd, model, systemPrompt, personality: opts.personality, networkAccess: opts.networkAccess });
 
   // Warm-context resume: when a prior run journaled this worker's thread id, try
   // re-attaching to the PERSISTED thread (thread/resume loads its rollout from
