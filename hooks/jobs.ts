@@ -6,6 +6,8 @@ type Deps = {
 }
 type RunOptions = {
   foregroundMs: number; background: boolean; signal?: AbortSignal; description?: string
+  /** Spawn desta chamada; ausente, o de `deps`. */
+  spawn?: Spawn
 }
 type Outcome = 'done' | 'error' | 'background' | 'cancelled'
 type Reply = { job: Job; outcome: Outcome }
@@ -124,7 +126,7 @@ export function createJobs(deps: Deps) {
       const diagnostics = () => stderr.trim().split('\n').slice(-20).join('\n')
       try {
         const reader = deps.codec.createJsonlReader()
-        const stream = deps.spawn({ argv: deps.codec.buildArgv(call), cwd: call.cwd, input: call.prompt })
+        const stream = (opts.spawn ?? deps.spawn)({ argv: deps.codec.buildArgv(call), cwd: call.cwd, input: call.prompt })
         // Observe exit rejection before pulling: it can precede the final chunk.
         const exit = stream.result.then(
           value => ({ ok: true as const, value }),
